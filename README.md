@@ -119,12 +119,67 @@ By fusing these signals, OpenBOM transforms a wall of CVEs into a short list of 
 | **Fleet-wide visibility** | Aggregate statistics across all managed endpoints |
 | **OpenAPI docs** | Auto-generated Swagger UI at `/docs` |
 
+## Supported Operating Systems
+
+OpenBOM auto-detects the package manager at runtime and adapts its extraction strategy accordingly. No configuration needed — just run the agent.
+
+### Tier 1 — Fully Tested
+
+These distributions are actively tested and used in development. All features work out of the box.
+
+| Distribution | Versions | Package Manager | Container Engine |
+|---|---|---|---|
+| **Fedora** | 39, 40, 41, 42 | `rpm` / `dnf` | Podman (native) |
+| **RHEL** | 8, 9 | `rpm` / `dnf` | Podman (native) |
+| **CentOS Stream** | 8, 9 | `rpm` / `dnf` | Podman (native) |
+| **Ubuntu** | 22.04, 24.04 | `dpkg-query` / `apt` | Podman / Docker |
+| **Debian** | 11 (Bullseye), 12 (Bookworm) | `dpkg-query` / `apt` | Podman / Docker |
+
+### Tier 2 — Expected to Work
+
+These distributions use the same package managers and should work without modification, but receive less frequent testing.
+
+| Distribution | Package Manager | Notes |
+|---|---|---|
+| **AlmaLinux** 8, 9 | `rpm` / `dnf` | RHEL binary-compatible |
+| **Rocky Linux** 8, 9 | `rpm` / `dnf` | RHEL binary-compatible |
+| **Oracle Linux** 8, 9 | `rpm` / `dnf` | RHEL binary-compatible |
+| **openSUSE** Leap 15.x, Tumbleweed | `rpm` / `zypper` | RPM extraction works; `zypper` not used directly |
+| **SUSE Linux Enterprise** 15 | `rpm` / `zypper` | Same as openSUSE |
+| **Amazon Linux** 2, 2023 | `rpm` / `dnf` / `yum` | Common on AWS EC2 |
+| **Linux Mint** 21, 22 | `dpkg-query` / `apt` | Ubuntu-based |
+| **Pop!_OS** 22.04 | `dpkg-query` / `apt` | Ubuntu-based |
+| **Kali Linux** | `dpkg-query` / `apt` | Debian-based |
+| **Arch Linux** | Not supported (pacman) | Contribution welcome |
+| **Alpine Linux** | Not supported (apk) | Contribution welcome |
+
+### Ecosystem Coverage
+
+Package extraction is independent of the host OS — these work on any supported distribution:
+
+| Ecosystem | Detection Method | Requirement |
+|---|---|---|
+| **Python (PyPI)** | `pip3 freeze --all` | Python 3.12+ with pip |
+| **Node.js (NPM)** | `npm list -g --depth=0 --json` | npm installed globally |
+| **Containers (Podman)** | `podman exec <id> rpm -qa` or `dpkg-query` | Podman with running containers |
+| **Containers (Docker)** | Not yet supported | Contribution welcome — Docker CLI is similar to Podman |
+
+### Backend Server
+
+The backend server runs on any OS with Python 3.12+, but is tested on:
+
+| Platform | Database | Status |
+|---|---|---|
+| **Linux** (any distribution) | PostgreSQL 14+ / SQLite | Fully supported |
+| **macOS** | PostgreSQL / SQLite | Works (development use) |
+| **Windows (WSL2)** | PostgreSQL / SQLite | Works (development use) |
+
 ## Quick Start
 
 ### Prerequisites
 
 - Python 3.12+
-- Linux (Fedora/RHEL/Debian/Ubuntu)
+- Linux (any Tier 1 or Tier 2 distribution above)
 - `pip`, `rpm` or `dpkg-query` (auto-detected)
 
 ### Installation
