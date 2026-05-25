@@ -6,7 +6,7 @@ If you discover a security vulnerability in OpenBOM, please report it responsibl
 
 **Do not open a public GitHub issue for security vulnerabilities.**
 
-Instead, please email: **security@openbom.dev** (or open a private security advisory at https://github.com/Masriyan/OpenBOM/security/advisories/new)
+Instead, please email: **riyan.pratama@security-life.org** (or open a private security advisory at https://github.com/Masriyan/OpenBOM/security/advisories/new)
 
 Include:
 - Description of the vulnerability
