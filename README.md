@@ -1,10 +1,19 @@
 <p align="center">
-  <img src="https://img.shields.io/badge/OpenBOM-Supply%20Chain%20Defense-0ea5e9?style=for-the-badge&logo=shield&logoColor=white" alt="OpenBOM">
-  <br>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/banner.svg">
+    <source media="(prefers-color-scheme: light)" srcset="assets/banner.svg">
+    <img src="assets/banner.svg" alt="OpenBOM — Supply Chain Threat Hunter" width="100%">
+  </picture>
+</p>
+
+<p align="center">
   <img src="https://img.shields.io/badge/python-3.12+-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.12+">
   <img src="https://img.shields.io/badge/FastAPI-0.110+-009688?style=flat-square&logo=fastapi&logoColor=white" alt="FastAPI">
   <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="MIT License">
   <img src="https://img.shields.io/badge/platform-Linux-FCC624?style=flat-square&logo=linux&logoColor=black" alt="Linux">
+  <img src="https://img.shields.io/badge/OSV.dev-Integrated-4285F4?style=flat-square" alt="OSV.dev">
+  <img src="https://img.shields.io/badge/CISA%20KEV-Integrated-cc0000?style=flat-square" alt="CISA KEV">
+  <img src="https://img.shields.io/badge/EPSS-Integrated-ff6b35?style=flat-square" alt="EPSS">
 </p>
 
 # OpenBOM
