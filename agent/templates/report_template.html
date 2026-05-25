@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenBOM Security Report — {{ hostname }}</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+        body { font-family: 'Inter', system-ui, -apple-system, sans-serif; background: #0f172a; color: #e2e8f0; }
+        .card { background: #1e293b; border: 1px solid #334155; border-radius: 0.75rem; }
+        .severity-critical { background: #991b1b; color: #fecaca; }
+        .severity-high { background: #9a3412; color: #fed7aa; }
+        .severity-medium { background: #854d0e; color: #fef08a; }
+        .severity-low { background: #166534; color: #bbf7d0; }
+        .severity-unknown { background: #475569; color: #cbd5e1; }
+        .severity-malicious_heuristic { background: #7f1d1d; color: #ffffff; animation: pulse-glow 1.5s infinite; }
+        .metric-card { transition: transform 0.2s; }
+        .metric-card:hover { transform: translateY(-2px); }
+        table { border-collapse: separate; border-spacing: 0; }
+        th { position: sticky; top: 0; z-index: 10; }
+        tr:hover td { background: #334155; }
+        .badge { display: inline-block; padding: 2px 10px; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+        .diff-new { background: #065f46; color: #6ee7b7; }
+        .diff-upgraded { background: #1e3a5f; color: #93c5fd; }
+        .diff-downgraded { background: #78350f; color: #fcd34d; }
+        .epss-high { background: #7f1d1d; color: #fca5a5; font-weight: 700; }
+        .epss-med { background: #78350f; color: #fde68a; }
+        .epss-low { color: #94a3b8; }
+        .badge-kev { background: linear-gradient(135deg, #dc2626, #991b1b); color: #fff; font-weight: 800; animation: pulse-glow 1.5s infinite; border: 1px solid #ef4444; }
+        .badge-poc { background: #92400e; color: #fbbf24; font-weight: 700; border: 1px solid #d97706; }
+        .badge-ioc { background: linear-gradient(135deg, #dc2626, #7f1d1d); color: #fff; font-weight: 800; animation: pulse-glow 1.5s infinite; border: 1px solid #ef4444; }
+        @keyframes pulse-glow { 0%, 100% { box-shadow: 0 0 8px rgba(239, 68, 68, 0.6); } 50% { box-shadow: 0 0 20px rgba(239, 68, 68, 0.9); } }
+        .kev-row { background: rgba(127, 29, 29, 0.15) !important; border-left: 3px solid #ef4444; }
+        .ioc-row { background: rgba(127, 29, 29, 0.25) !important; border-left: 3px solid #ff0000; }
+    </style>
+</head>
+<body class="min-h-screen p-6">
+
+    <header class="max-w-7xl mx-auto mb-8">
+        <div class="flex items-center justify-between flex-wrap gap-4">
+            <div>
+                <h1 class="text-3xl font-bold text-white tracking-tight">
+                    <span class="text-cyan-400">OpenBOM</span> Security Report
+                </h1>
+                <p class="text-gray-400 mt-1">Ultimate Supply Chain Threat Hunting</p>
+            </div>
+            <div class="text-right text-sm text-gray-400">
+                <p>Generated: <span class="text-gray-200">{{ generated_at }}</span></p>
+                <p>Agent Version: <span class="text-gray-200">4.0 Ultimate Threat Hunting</span></p>
+            </div>
+        </div>
+        <div class="mt-4 h-1 bg-gradient-to-r from-cyan-500 via-blue-500 to-purple-500 rounded-full"></div>
+    </header>
+
+    <main class="max-w-7xl mx-auto space-y-8">
+
+        <!-- System Overview -->
+        <section class="card p-6">
+            <h2 class="text-xl font-semibold text-white mb-4 flex items-center gap-2">
+                <svg class="w-5 h-5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+                System Overview
+            </h2>
+            <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
+                <div class="bg-gray-800 rounded-lg p-4"><p class="text-xs text-gray-400 uppercase tracking-wider">Hostname</p><p class="text-lg font-mono text-white mt-1">{{ hostname }}</p></div>
+                <div class="bg-gray-800 rounded-lg p-4"><p class="text-xs text-gray-400 uppercase tracking-wider">Scan Time (UTC)</p><p class="text-lg font-mono text-white mt-1">{{ scan_ts[:19] }}</p></div>
+                <div class="bg-gray-800 rounded-lg p-4"><p class="text-xs text-gray-400 uppercase tracking-wider">OS Packages</p><p class="text-lg font-mono text-cyan-300 mt-1">{{ os_packages }}</p></div>
+                <div class="bg-gray-800 rounded-lg p-4"><p class="text-xs text-gray-400 uppercase tracking-wider">PyPI Packages</p><p class="text-lg font-mono text-green-300 mt-1">{{ pypi_packages }}</p></div>
+                <div class="bg-gray-800 rounded-lg p-4"><p class="text-xs text-gray-400 uppercase tracking-wider">NPM Packages</p><p class="text-lg font-mono text-blue-300 mt-1">{{ npm_packages }}</p></div>
+            </div>
+            {% for eco, count in ecosystem_counts.items() if eco not in ['RPM', 'Debian', 'PyPI', 'NPM'] %}
+            {% if loop.first %}<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">{% endif %}
+                <div class="bg-gray-800 rounded-lg p-4"><p class="text-xs text-gray-400 uppercase tracking-wider">{{ eco }}</p><p class="text-lg font-mono text-purple-300 mt-1">{{ count }}</p></div>
+            {% if loop.last %}</div>{% endif %}
+            {% endfor %}
+        </section>
+
+        <!-- Diff Summary -->
+        {% if diff_summary %}
+        <section class="card p-6">
+            <h2 class="text-xl font-semibold text-white mb-4 flex items-center gap-2">
+                <svg class="w-5 h-5 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg>
+                Delta from Last Scan
+            </h2>
+            <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
+                <div class="bg-gray-800 rounded-lg p-4 text-center border border-green-800"><p class="text-2xl font-bold text-green-400">+{{ diff_summary.new|default(0) }}</p><p class="text-xs text-gray-400 uppercase mt-1">New</p></div>
+                <div class="bg-gray-800 rounded-lg p-4 text-center border border-red-800"><p class="text-2xl font-bold text-red-400">-{{ diff_summary.removed|default(0) }}</p><p class="text-xs text-gray-400 uppercase mt-1">Removed</p></div>
+                <div class="bg-gray-800 rounded-lg p-4 text-center border border-cyan-800"><p class="text-2xl font-bold text-cyan-400">{{ diff_summary.upgraded|default(0) }}</p><p class="text-xs text-gray-400 uppercase mt-1">Upgraded</p></div>
+                <div class="bg-gray-800 rounded-lg p-4 text-center border border-yellow-800"><p class="text-2xl font-bold text-yellow-400">{{ diff_summary.downgraded|default(0) }}</p><p class="text-xs text-gray-400 uppercase mt-1">Downgraded</p></div>
+                <div class="bg-gray-800 rounded-lg p-4 text-center border border-gray-700"><p class="text-2xl font-bold text-gray-400">{{ diff_summary.unchanged|default(0) }}</p><p class="text-xs text-gray-400 uppercase mt-1">Unchanged</p></div>
+            </div>
+        </section>
+        {% endif %}
+
+        <!-- CISA KEV Alert -->
+        {% if vulnerabilities %}
+            {% set ns_kev = namespace(hits=[]) %}
+            {% for finding in vulnerabilities %}
+                {% for vuln in finding.vulns %}
+                    {% if vuln.is_kev %}
+                        {% set _ = ns_kev.hits.append({"pkg": finding.package.name, "ver": finding.package.version, "id": vuln.vuln_id, "desc": vuln.kev_description}) %}
+                    {% endif %}
+                {% endfor %}
+            {% endfor %}
+            {% if ns_kev.hits %}
+            <section class="card p-6 border-2 border-red-600" style="background: linear-gradient(135deg, #1e293b 0%, #2d1215 100%);">
+                <h2 class="text-xl font-semibold text-red-400 mb-4 flex items-center gap-2">
+                    <svg class="w-6 h-6 text-red-500" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+                    CISA KEV — {{ ns_kev.hits|length }} Actively Exploited Vulnerabilit{{ "y" if ns_kev.hits|length == 1 else "ies" }}
+                </h2>
+                <p class="text-red-300 text-sm mb-4">These CVEs are confirmed to be actively exploited in the wild by CISA's Known Exploited Vulnerabilities catalog.</p>
+                <div class="space-y-3">
+                    {% for item in ns_kev.hits %}
+                    <div class="flex items-start gap-3 bg-red-900 bg-opacity-30 rounded-lg px-4 py-3 border border-red-800">
+                        <span class="badge badge-kev mt-0.5">KEV</span>
+                        <div>
+                            <div><code class="text-red-300 font-bold text-sm">{{ item.id }}</code><span class="text-gray-400 mx-2">on</span><span class="text-white font-medium">{{ item.pkg }}=={{ item.ver }}</span></div>
+                            {% if item.desc %}<p class="text-gray-400 text-xs mt-1">{{ item.desc[:180] }}</p>{% endif %}
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </section>
+            {% endif %}
+
+            <!-- Heuristic IOC Alert -->
+            {% set ns_ioc = namespace(hits=[]) %}
+            {% for finding in vulnerabilities %}
+                {% for vuln in finding.vulns %}
+                    {% if vuln.vuln_id == 'MALICIOUS_HEURISTIC' %}
+                        {% set _ = ns_ioc.hits.append({"pkg": finding.package.name, "ver": finding.package.version, "summary": vuln.summary}) %}
+                    {% endif %}
+                {% endfor %}
+            {% endfor %}
+            {% if ns_ioc.hits %}
+            <section class="card p-6 border-2 border-red-500" style="background: linear-gradient(135deg, #1e293b 0%, #3b0d0d 100%);">
+                <h2 class="text-xl font-semibold text-red-300 mb-4 flex items-center gap-2">
+                    <svg class="w-6 h-6 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg>
+                    Heuristic IOC — Possible Supply-Chain Attack
+                </h2>
+                <div class="space-y-3">
+                    {% for item in ns_ioc.hits %}
+                    <div class="bg-red-900 bg-opacity-40 rounded-lg px-4 py-3 border border-red-700">
+                        <div class="flex items-center gap-2 mb-1"><span class="badge badge-ioc">MALWARE</span><span class="text-white font-bold">{{ item.pkg }}=={{ item.ver }}</span></div>
+                        <p class="text-yellow-300 text-xs">{{ item.summary[:200] }}</p>
+                    </div>
+                    {% endfor %}
+                </div>
+            </section>
+            {% endif %}
+        {% endif %}
+
+        <!-- Vulnerability Metrics -->
+        {% if summary %}
+        <section class="card p-6">
+            <h2 class="text-xl font-semibold text-white mb-4 flex items-center gap-2">
+                <svg class="w-5 h-5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg>
+                Vulnerability Metrics
+            </h2>
+            <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4 mb-6">
+                <div class="metric-card bg-gray-800 rounded-lg p-4 text-center border border-gray-700"><p class="text-3xl font-bold text-white">{{ summary.queried|default(0) }}</p><p class="text-xs text-gray-400 uppercase mt-1">Scanned</p></div>
+                <div class="metric-card bg-gray-800 rounded-lg p-4 text-center border border-red-900"><p class="text-3xl font-bold text-red-400">{{ summary.vulnerable|default(0) }}</p><p class="text-xs text-gray-400 uppercase mt-1">Vulnerable</p></div>
+                <div class="metric-card bg-gray-800 rounded-lg p-4 text-center border border-red-700"><p class="text-3xl font-bold text-red-500">{{ summary.total_critical|default(0) }}</p><p class="text-xs text-red-400 uppercase mt-1">Critical</p></div>
+                <div class="metric-card bg-gray-800 rounded-lg p-4 text-center border border-orange-700"><p class="text-3xl font-bold text-orange-400">{{ summary.total_high|default(0) }}</p><p class="text-xs text-orange-400 uppercase mt-1">High</p></div>
+                <div class="metric-card bg-gray-800 rounded-lg p-4 text-center border border-yellow-700"><p class="text-3xl font-bold text-yellow-400">{{ summary.total_medium|default(0) }}</p><p class="text-xs text-yellow-400 uppercase mt-1">Medium</p></div>
+                <div class="metric-card bg-gray-800 rounded-lg p-4 text-center border border-green-700"><p class="text-3xl font-bold text-green-400">{{ summary.total_low|default(0) }}</p><p class="text-xs text-green-400 uppercase mt-1">Low</p></div>
+                {% if summary.kev_hits|default(0) > 0 %}
+                <div class="metric-card bg-gray-800 rounded-lg p-4 text-center border-2 border-red-500" style="box-shadow: 0 0 15px rgba(239,68,68,0.3);"><p class="text-3xl font-bold text-red-400">{{ summary.kev_hits }}</p><p class="text-xs text-red-400 uppercase mt-1">CISA KEV</p></div>
+                {% endif %}
+                {% if summary.poc_count|default(0) > 0 %}
+                <div class="metric-card bg-gray-800 rounded-lg p-4 text-center border border-yellow-600"><p class="text-3xl font-bold text-yellow-400">{{ summary.poc_count }}</p><p class="text-xs text-yellow-400 uppercase mt-1">Has PoC</p></div>
+                {% endif %}
+            </div>
+            {% set total_vulns = summary.total_critical|default(0) + summary.total_high|default(0) + summary.total_medium|default(0) + summary.total_low|default(0) + summary.total_unknown|default(0) %}
+            {% if total_vulns > 0 %}
+            <div class="bg-gray-800 rounded-lg p-4">
+                <p class="text-sm text-gray-400 mb-2">Severity Distribution ({{ total_vulns }} total findings)</p>
+                <div class="flex h-4 rounded-full overflow-hidden">
+                    {% if summary.total_critical|default(0) > 0 %}<div class="bg-red-600" style="width: {{ (summary.total_critical|default(0) / total_vulns * 100)|round(1) }}%"></div>{% endif %}
+                    {% if summary.total_high|default(0) > 0 %}<div class="bg-orange-500" style="width: {{ (summary.total_high|default(0) / total_vulns * 100)|round(1) }}%"></div>{% endif %}
+                    {% if summary.total_medium|default(0) > 0 %}<div class="bg-yellow-500" style="width: {{ (summary.total_medium|default(0) / total_vulns * 100)|round(1) }}%"></div>{% endif %}
+                    {% if summary.total_low|default(0) > 0 %}<div class="bg-green-500" style="width: {{ (summary.total_low|default(0) / total_vulns * 100)|round(1) }}%"></div>{% endif %}
+                    {% if summary.total_unknown|default(0) > 0 %}<div class="bg-gray-500" style="width: {{ (summary.total_unknown|default(0) / total_vulns * 100)|round(1) }}%"></div>{% endif %}
+                </div>
+                <div class="flex gap-4 mt-2 text-xs text-gray-400">
+                    <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-red-600 inline-block"></span> Critical</span>
+                    <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-orange-500 inline-block"></span> High</span>
+                    <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-yellow-500 inline-block"></span> Medium</span>
+                    <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-green-500 inline-block"></span> Low</span>
+                    <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-gray-500 inline-block"></span> Unknown</span>
+                </div>
+            </div>
+            {% endif %}
+        </section>
+        {% endif %}
+
+        <!-- Detailed Findings -->
+        {% if vulnerabilities %}
+        <section class="card p-6">
+            <h2 class="text-xl font-semibold text-white mb-4 flex items-center gap-2">
+                <svg class="w-5 h-5 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+                Detailed Findings &amp; Remediation
+            </h2>
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm text-left">
+                    <thead>
+                        <tr class="bg-gray-800 text-gray-300 uppercase text-xs tracking-wider">
+                            <th class="px-3 py-3 rounded-tl-lg">#</th>
+                            <th class="px-3 py-3">Package</th>
+                            <th class="px-3 py-3">Version</th>
+                            <th class="px-3 py-3">Vuln ID</th>
+                            <th class="px-3 py-3">Severity</th>
+                            <th class="px-3 py-3">EPSS</th>
+                            <th class="px-3 py-3">Intel</th>
+                            <th class="px-3 py-3">Summary</th>
+                            <th class="px-3 py-3 rounded-tr-lg">Recommendation</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% set ns = namespace(counter=0) %}
+                        {% for finding in vulnerabilities %}
+                            {% for vuln in finding.vulns %}
+                                {% set ns.counter = ns.counter + 1 %}
+                                <tr class="border-b border-gray-700 {% if vuln.vuln_id == 'MALICIOUS_HEURISTIC' %}ioc-row{% elif vuln.is_kev %}kev-row{% endif %}">
+                                    <td class="px-3 py-3 text-gray-500 font-mono">{{ ns.counter }}</td>
+                                    <td class="px-3 py-3 font-medium text-white">
+                                        {% if finding.package.diff_label %}
+                                            <span class="badge {% if finding.package.diff_label == '[NEW]' %}diff-new{% elif finding.package.diff_label == '[UPGRADED]' %}diff-upgraded{% elif finding.package.diff_label == '[DOWNGRADED]' %}diff-downgraded{% endif %} mr-1 text-xs">{{ finding.package.diff_label }}</span>
+                                        {% endif %}
+                                        {{ finding.package.name }}
+                                    </td>
+                                    <td class="px-3 py-3 font-mono text-gray-300">{{ finding.package.version }}</td>
+                                    <td class="px-3 py-3"><code class="text-cyan-300 text-xs">{{ vuln.vuln_id }}</code></td>
+                                    <td class="px-3 py-3"><span class="badge severity-{{ vuln.severity|lower }}">{{ vuln.severity }}</span></td>
+                                    <td class="px-3 py-3 text-center">
+                                        {% if vuln.epss_score is not none %}
+                                            {% set epss_pct = vuln.epss_score * 100 %}
+                                            <span class="badge {% if epss_pct >= 10 %}epss-high{% elif epss_pct >= 1 %}epss-med{% else %}epss-low{% endif %}">{{ "%.1f"|format(epss_pct) }}%</span>
+                                        {% else %}<span class="text-gray-600">—</span>{% endif %}
+                                    </td>
+                                    <td class="px-3 py-3">
+                                        {% if vuln.is_kev %}<span class="badge badge-kev mr-1">KEV</span>{% endif %}
+                                        {% if vuln.poc_links %}<span class="badge badge-poc mr-1">PoC({{ vuln.poc_links|length }})</span>{% endif %}
+                                        {% if vuln.vuln_id == 'MALICIOUS_HEURISTIC' %}<span class="badge badge-ioc">IOC</span>{% endif %}
+                                        {% if not vuln.is_kev and not vuln.poc_links and vuln.vuln_id != 'MALICIOUS_HEURISTIC' %}<span class="text-gray-600">—</span>{% endif %}
+                                    </td>
+                                    <td class="px-3 py-3 text-gray-400 max-w-xs truncate" title="{{ vuln.summary }}">{{ vuln.summary[:80] }}</td>
+                                    <td class="px-3 py-3">
+                                        {% if vuln.vuln_id == 'MALICIOUS_HEURISTIC' %}<span class="text-red-400 font-bold">QUARANTINE IMMEDIATELY</span>
+                                        {% elif vuln.fixed_version %}<span class="text-green-400 font-medium">Upgrade to {{ vuln.fixed_version }}</span>
+                                        {% else %}<span class="text-yellow-400">Review for alternatives</span>{% endif %}
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+        {% endif %}
+
+        {% if not vulnerabilities and summary %}
+        <section class="card p-6 text-center">
+            <div class="py-8">
+                <svg class="w-16 h-16 mx-auto text-green-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+                <h3 class="text-2xl font-bold text-green-400">All Clear</h3>
+                <p class="text-gray-400 mt-2">No known vulnerabilities were found in the scanned packages.</p>
+            </div>
+        </section>
+        {% endif %}
+    </main>
+
+    <footer class="max-w-7xl mx-auto mt-12 pt-6 border-t border-gray-700 text-center text-xs text-gray-500">
+        <p>OpenBOM Endpoint Agent v4.0 — Ultimate Threat Hunting Edition</p>
+        <p class="mt-1">Data sourced from <a href="https://osv.dev" class="text-cyan-500 hover:underline">OSV.dev</a>, <a href="https://www.first.org/epss/" class="text-cyan-500 hover:underline">FIRST.org EPSS</a> &amp; <a href="https://www.cisa.gov/known-exploited-vulnerabilities-catalog" class="text-cyan-500 hover:underline">CISA KEV</a> — Report generated {{ generated_at }}</p>
+    </footer>
+</body>
+</html>
