@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# OpenBOM runtime output — scan results contain host names and package inventories
+output/
+logs/
+*.db
+*.db-wal
+*.db-shm
+sbom_*.json
+cyclonedx_*.json
+report_openbom_*.html
+report_openbom_*.pdf
+*.sarif
+*.cdx.json
+*.spdx.json
+.openbom-cache/
+openbom-out/
+/tmp/openbom_*.json
+# Personal ignore file (reviewed FPs of your own hosts); .openbomignore.example is the template
+/.openbomignore
+
+# Secrets / local configuration
+.env
+*.env
+!.env.example
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude Code (local settings)
+.claude/
