@@ -291,7 +291,9 @@ class Package:
     osv_name: str | None = None
     osv_version: str | None = None
     license: str | None = None
-    location: str | None = None  # manifest/lockfile/archive the package was found in (path scans)
+    # Where the package lives: manifest/lockfile/archive relative to the target root for path/rootfs/image
+    # scans, absolute dist-info / node_modules directory for host pip/npm packages.
+    location: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {f.name: getattr(self, f.name) for f in fields(self)
@@ -1320,6 +1322,7 @@ def extract_python_packages(progress: Progress, task_id: Any) -> list[Package]:
         return packages
     seen: set[tuple[str, str]] = set()
     licenses = _installed_python_licenses()
+    locations = _installed_python_locations(pip_cmd)
     for line in raw.strip().splitlines():
         line = line.strip()
         if "==" in line and not line.startswith("#"):
@@ -1328,7 +1331,8 @@ def extract_python_packages(progress: Progress, task_id: Any) -> list[Package]:
             if key not in seen:
                 seen.add(key)
                 packages.append(Package(name=name.strip(), version=version.strip(), ecosystem="PyPI",
-                                        osv_ecosystem="PyPI", license=licenses.get(_normalize_name(name))))
+                                        osv_ecosystem="PyPI", license=licenses.get(_normalize_name(name)),
+                                        location=locations.get(_normalize_name(name))))
         elif " @ " in line:
             log.debug("Skipping direct-reference requirement (no version): %s", line)
     progress.update(task_id, total=max(len(packages), 1), completed=max(len(packages), 1))
@@ -1365,7 +1369,9 @@ def extract_npm_packages(progress: Progress, task_id: Any) -> list[Package]:
         if npm_root is not None:
             with contextlib.suppress(OSError, json.JSONDecodeError, UnicodeDecodeError, AttributeError):
                 license_ = normalize_license(json.loads((npm_root / name / "package.json").read_text()).get("license"))
-        packages.append(Package(name=name, version=version, ecosystem="NPM", osv_ecosystem="npm", license=license_))
+        location = (info or {}).get("path") or (str(npm_root / name) if npm_root is not None else None)
+        packages.append(Package(name=name, version=version, ecosystem="NPM", osv_ecosystem="npm", license=license_,
+                                location=location if isinstance(location, str) else None))
     progress.update(task_id, total=max(len(packages), 1), completed=max(len(packages), 1))
     log.info("Extracted %d NPM global packages", len(packages))
     return packages
@@ -1481,6 +1487,32 @@ def _license_from_metadata(meta: Any) -> str | None:
         return lic
     classifiers = [c for c in (meta.get_all("Classifier") or []) if c.startswith("License ::")]
     return normalize_license(classifiers) if classifiers else None
+
+
+def _installed_python_locations(pip_cmd: list[str]) -> dict[str, str]:
+    """Normalized name -> install path, so a finding can be traced to the environment that holds it.
+
+    The exact *.dist-info directory comes from this interpreter's metadata; packages that `pip` sees in
+    another environment (pip3 on PATH ≠ sys.executable) fall back to the site-packages dir from `pip list -v`.
+    """
+    out: dict[str, str] = {}
+    try:
+        for dist in importlib.metadata.distributions():
+            name = dist.metadata.get("Name")
+            path = getattr(dist, "_path", None)  # PathDistribution: the .dist-info / .egg-info directory
+            if name and path is not None:
+                out.setdefault(_normalize_name(name), str(Path(str(path)).resolve()))
+    except Exception as exc:  # metadata of broken installs must not break the scan
+        log.debug("Could not read Python install locations: %s", exc)
+    raw = _run([*pip_cmd, "list", "-v", "--format=json"])
+    try:
+        for entry in json.loads(raw) if raw and raw.strip() else []:
+            name, loc = entry.get("name"), entry.get("location")
+            if name and loc and isinstance(loc, str):
+                out.setdefault(_normalize_name(name), loc)
+    except (json.JSONDecodeError, AttributeError, TypeError):
+        log.debug("pip list -v returned unusable JSON")
+    return out
 
 
 @functools.lru_cache(maxsize=1)
@@ -3128,7 +3160,7 @@ def render_summary_table(report: ScanReport, max_rows: int = 200) -> None:
         console.print(Panel(
             "\n".join(f"  [blink bold bright_red]>>> {escape(v.vuln_id)}[/blink bold bright_red] "
                       f"[bold]{escape(r.package.name)}=={escape(r.package.version)}[/bold] ({escape(r.package.ecosystem)})"
-                      f"\n      [dim]{escape(v.summary[:120])}[/dim]" for r, v in mal_findings),
+                      f"\n      [dim]{escape(v.summary[:120])}[/dim]{_location_line(r.package)}" for r, v in mal_findings),
             title=f"[blink bold bright_red]KNOWN MALICIOUS PACKAGES — {len(mal_findings)} (OpenSSF)[/blink bold bright_red]",
             subtitle="remove immediately and treat the host as compromised",
             border_style="bright_red", expand=False,
@@ -3144,6 +3176,8 @@ def render_summary_table(report: ScanReport, max_rows: int = 200) -> None:
             )
             if v.kev_description:
                 kev_lines.append(f"      [dim]{escape(v.kev_description[:120])}[/dim]")
+            if r.package.location:
+                kev_lines.append(_location_line(r.package).lstrip("\n"))
         console.print(Panel(
             "\n".join(kev_lines),
             title=f"[blink bold bright_red]CISA KEV — {len(kev_findings)} ACTIVELY EXPLOITED[/blink bold bright_red]",
@@ -3159,7 +3193,7 @@ def render_summary_table(report: ScanReport, max_rows: int = 200) -> None:
                 f"  [blink bold bright_red]{tag}[/blink bold bright_red]"
                 f" [bold]{escape(r.package.name)}=={escape(r.package.version)}[/bold] ({v.severity})"
             )
-            h_lines.append(f"      [yellow]{escape(v.summary[:160])}[/yellow]")
+            h_lines.append(f"      [yellow]{escape(v.summary[:160])}[/yellow]{_location_line(r.package)}")
         console.print(Panel(
             "\n".join(h_lines),
             title="[blink bold bright_red]HEURISTIC IOC — POSSIBLE SUPPLY-CHAIN ATTACK[/blink bold bright_red]",
@@ -3200,6 +3234,9 @@ def render_summary_table(report: ScanReport, max_rows: int = 200) -> None:
     rows = sorted(((r, v) for r in vulnerable for v in r.vulns), key=lambda rv: finding_sort_key(rv[1]))
     for idx, (r, v) in enumerate(rows[:max_rows], 1):
         pkg_label = r.package.name if not r.package.diff_label else f"{r.package.diff_label} {r.package.name}"
+        pkg_cell = Text(pkg_label)
+        if r.package.location:
+            pkg_cell.append(f"\n{r.package.location}", style="dim cyan")
         if v.epss_score is not None:
             pct = v.epss_score * 100
             epss_obj = Text(f"{pct:.1f}%", style="bold red" if pct >= 10 else ("yellow" if pct >= 1 else "dim"))
@@ -3216,7 +3253,7 @@ def render_summary_table(report: ScanReport, max_rows: int = 200) -> None:
             intel_parts.append("[blink bold bright_red]IOC[/blink bold bright_red]")
         intel_text = Text.from_markup(" ".join(intel_parts)) if intel_parts else Text("—", style="dim")
         detail_table.add_row(
-            str(idx), Text(pkg_label), Text(r.package.version), Text(v.vuln_id),
+            str(idx), pkg_cell, Text(r.package.version), Text(v.vuln_id),
             Text(v.severity, style=sev_colors.get(v.severity, "white")), epss_obj, intel_text, Text(v.recommendation),
         )
     console.print(detail_table)
@@ -3235,6 +3272,10 @@ def render_summary_table(report: ScanReport, max_rows: int = 200) -> None:
             title=f"[bold red]High Exploit Probability ({len(high_epss)} findings with EPSS >= 10%)[/bold red]",
             border_style="red", expand=False,
         ))
+
+
+def _location_line(pkg: Package) -> str:
+    return f"\n      [cyan]found in[/cyan] [dim]{escape(pkg.location)}[/dim]" if pkg.location else ""
 
 
 def finding_sort_key(v: VulnDetail) -> tuple[int, int, int, int, float]:
@@ -3674,8 +3715,8 @@ async def run_scan(args: argparse.Namespace) -> tuple[int, ScanReport | None]:
                 heuristics_ran = True
                 h_task = progress.add_task("[bright_red]Heuristic IOC + typosquat scan …", total=len(targets))
                 for pkg in targets:
-                    ioc = scan_heuristics(pkg, progress, h_task) if not custom and pkg.location is None else None
-                    if custom or pkg.location is not None:
+                    ioc = scan_heuristics(pkg, progress, h_task) if not custom else None
+                    if custom:
                         progress.advance(h_task)
                     found = [d for d in (ioc, check_typosquat(pkg)) if d]
                     if found:

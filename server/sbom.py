@@ -64,7 +64,7 @@ async def asset_cyclonedx(db: AsyncSession, asset: Asset) -> dict[str, Any]:
         components.append(comp)
 
     vulns: dict[int, dict[str, Any]] = {}
-    for _a, pkg, v, fixed, rec in (await db.execute(findings_query(Asset.id == asset.id))).all():
+    for _a, pkg, v, fixed, rec, _loc in (await db.execute(findings_query(Asset.id == asset.id))).all():
         entry = vulns.get(v.id)
         if entry is None:
             rating: dict[str, Any] = {"severity": (v.severity or "unknown").lower()}

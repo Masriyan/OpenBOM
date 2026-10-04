@@ -82,6 +82,22 @@ python3 agent/openbom_agent.py --sbom syft-output.cdx.json  # CycloneDX or SPDX 
 
 Local path/workspace dependencies are skipped. Malformed files are logged at debug level and skipped.
 
+### Package locations
+
+Every package carries `location`, the place it was found, so a finding can be traced to the copy that
+needs fixing:
+
+| Target | `location` |
+|--------|------------|
+| Host pip | Absolute `*.dist-info` directory from the agent's interpreter; falls back to the site-packages directory from `pip list -v` when `pip` on `PATH` belongs to another environment |
+| Host global npm | `<npm root -g>/<package>` |
+| `--path`, `--rootfs` | Manifest / lockfile / `METADATA` / archive, **relative to the target root** (portable, and what SARIF expects). The backend stores it as an absolute path |
+| `--image` | Path inside the image |
+| `--sbom` | `sbom` |
+| OS and container packages | none |
+
+The console summary, the HTML/PDF report and the JSON all include it.
+
 ### OS package coverage
 
 | Distribution | Inventory | OSV matching |
@@ -111,12 +127,12 @@ Local path/workspace dependencies are skipped. Malformed files are logged at deb
 
 | Output | Flag | Notes |
 |--------|------|-------|
-| Console summary | always | Asset, target, OS, ecosystems, delta, EOL, license violations, malicious/KEV/IOC panels, metrics, findings (highest risk first) |
+| Console summary | always | Asset, target, OS, ecosystems, delta, EOL, license violations, malicious/KEV/IOC panels (with "found in" paths), metrics, findings (highest risk first, path under the package name) |
 | Native JSON | `-o` (default `output/sbom_<ts>.json`) | Backend ingest format |
 | CycloneDX 1.5 | `--cyclonedx PATH` | components with purls + vulnerabilities (ratings, EPSS, KEV properties) |
 | SPDX 2.3 | `--spdx PATH` | packages with purls and declared licenses (`LicenseRef-*` for non-SPDX strings) |
 | SARIF 2.1.0 | `--sarif PATH` | one rule per advisory, results located at the lockfile that introduced the package |
-| HTML / PDF | `--report` | dark-theme report in `--output-dir`; PDF needs WeasyPrint |
+| HTML / PDF | `--report` | dark-theme report in `--output-dir` with the path of every finding; PDF needs WeasyPrint |
 | Webhook | `--webhook-url` | sent when malicious, KEV, IOC, critical or EOL findings exist |
 | Backend | `--server-url` (+ `--api-key`) | POST to `/api/v1/ingest` with retries |
 
@@ -133,7 +149,10 @@ Local path/workspace dependencies are skipped. Malformed files are logged at deb
   "packages": [
     {"name": "libssl3", "version": "3.0.11-1~deb12u1", "ecosystem": "Debian", "diff_label": null,
      "osv_ecosystem": "Debian:12", "osv_name": "openssl", "license": "Apache-2.0",
-     "purl": "pkg:deb/debian/libssl3@3.0.11-1~deb12u1?distro=debian-12&upstream=openssl"}
+     "purl": "pkg:deb/debian/libssl3@3.0.11-1~deb12u1?distro=debian-12&upstream=openssl"},
+    {"name": "requests", "version": "2.31.0", "ecosystem": "PyPI", "diff_label": null, "osv_ecosystem": "PyPI",
+     "license": "Apache-2.0", "purl": "pkg:pypi/requests@2.31.0",
+     "location": "/usr/lib/python3/dist-packages/requests-2.31.0.dist-info"}
   ],
   "diff_summary": {"new": 2, "removed": 0, "upgraded": 5, "downgraded": 0, "unchanged": 1827},
   "removed_packages": [],

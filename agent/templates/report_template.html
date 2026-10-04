@@ -98,7 +98,7 @@
             {% for finding in vulnerabilities %}
                 {% for vuln in finding.vulns %}
                     {% if vuln.is_kev %}
-                        {% set _ = ns_kev.hits.append({"pkg": finding.package.name, "ver": finding.package.version, "id": vuln.vuln_id, "desc": vuln.kev_description}) %}
+                        {% set _ = ns_kev.hits.append({"pkg": finding.package.name, "ver": finding.package.version, "id": vuln.vuln_id, "desc": vuln.kev_description, "loc": finding.package.location}) %}
                     {% endif %}
                 {% endfor %}
             {% endfor %}
@@ -116,6 +116,7 @@
                         <div>
                             <div><code class="text-red-300 font-bold text-sm">{{ item.id }}</code><span class="text-gray-400 mx-2">on</span><span class="text-white font-medium">{{ item.pkg }}=={{ item.ver }}</span></div>
                             {% if item.desc %}<p class="text-gray-400 text-xs mt-1">{{ item.desc[:180] }}</p>{% endif %}
+                            {% if item.loc %}<p class="text-cyan-300 text-xs mt-1 font-mono break-all">found in {{ item.loc }}</p>{% endif %}
                         </div>
                     </div>
                     {% endfor %}
@@ -128,7 +129,7 @@
             {% for finding in vulnerabilities %}
                 {% for vuln in finding.vulns %}
                     {% if vuln.is_heuristic %}
-                        {% set _ = ns_ioc.hits.append({"pkg": finding.package.name, "ver": finding.package.version, "summary": vuln.summary}) %}
+                        {% set _ = ns_ioc.hits.append({"pkg": finding.package.name, "ver": finding.package.version, "summary": vuln.summary, "loc": finding.package.location}) %}
                     {% endif %}
                 {% endfor %}
             {% endfor %}
@@ -143,6 +144,7 @@
                     <div class="bg-red-900 bg-opacity-40 rounded-lg px-4 py-3 border border-red-700">
                         <div class="flex items-center gap-2 mb-1"><span class="badge badge-ioc">MALWARE</span><span class="text-white font-bold">{{ item.pkg }}=={{ item.ver }}</span></div>
                         <p class="text-yellow-300 text-xs">{{ item.summary[:200] }}</p>
+                        {% if item.loc %}<p class="text-cyan-300 text-xs font-mono break-all">found in {{ item.loc }}</p>{% endif %}
                     </div>
                     {% endfor %}
                 </div>
@@ -228,6 +230,7 @@
                                             <span class="badge {% if finding.package.diff_label == '[NEW]' %}diff-new{% elif finding.package.diff_label == '[UPGRADED]' %}diff-upgraded{% elif finding.package.diff_label == '[DOWNGRADED]' %}diff-downgraded{% endif %} mr-1 text-xs">{{ finding.package.diff_label }}</span>
                                         {% endif %}
                                         {{ finding.package.name }}
+                                        {% if finding.package.location %}<div class="text-xs text-cyan-300 font-mono break-all mt-1" title="{{ finding.package.location }}">{{ finding.package.location }}</div>{% endif %}
                                     </td>
                                     <td class="px-3 py-3 font-mono text-gray-300">{{ finding.package.version }}</td>
                                     <td class="px-3 py-3"><code class="text-cyan-300 text-xs">{{ vuln.vuln_id }}</code></td>

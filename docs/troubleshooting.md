@@ -45,6 +45,9 @@ rm -f ~/.cache/openbom/*.json       # /var/lib/openbom/*.json when running as ro
 | `database is locked` (SQLite) | Many agents pushing at once. SQLite has a 30 s busy timeout and WAL; for fleets use PostgreSQL |
 | HTTP 409 "Concurrent ingest conflict" | Two ingests created the same package simultaneously three times in a row; the agent can simply retry |
 | A removed package still shows as vulnerable | Ingest is snapshot-based — the host's next scan removes it. To drop a host entirely use *Decommission* |
+| "I fixed it but it still shows" (e.g. a KEV) | Check **which asset** reports it and the **Found in** path. A `--path` scan of a directory tree also reads every venv/lockfile below it, so another project may still pin the old version. Fix that copy, then re-run the agent **on the same target** — a host scan does not refresh a `path:` asset |
+| Finding tagged **resolved · still detected** | `resolved` is a note, not a suppression: the last scan still contains the vulnerable version. Rescan after fixing, or use `not_affected` / `false_positive` with a justification if it really does not apply |
+| "path not recorded" | OS/container packages have no single file. For pip/npm/lockfile packages, the scan came from an older agent — rescan |
 | Counts differ between Overview and an asset | Triage decisions suppress findings fleet-wide or per asset; enable "show suppressed" to compare |
 | Re-analysis returns `packages_checked: 0` | The stored packages have no OSV ecosystem (e.g. Fedora RPMs) — nothing to query |
 | Scheduled re-analysis does nothing | `OPENBOM_REANALYZE_HOURS` must be > 0; the first run happens one interval after startup. Check the log for "Scheduled re-analysis" |
@@ -56,4 +59,5 @@ rm -f ~/.cache/openbom/*.json       # /var/lib/openbom/*.json when running as ro
 | "API key required" on every page | Enter the key in **Settings**; it is stored per browser |
 | Blank page | Check the browser console. The page needs JavaScript and loads only from the same origin; a reverse proxy must forward `/static/*` |
 | Old UI after upgrading | Hard-reload; `app.js`/`app.css` are served `no-cache`, vendor files are cached 7 days and only change with new filenames/versions |
+| New console columns are empty (e.g. no paths on *Vulnerabilities*) | The browser loaded the new `app.js` but the backend process still runs old code. Restart `uvicorn`; static files are picked up immediately, Python code is not (unless started with `--reload`) |
 | Behind a reverse proxy at a sub-path | Not supported yet — serve OpenBOM at the root of a (sub)domain |

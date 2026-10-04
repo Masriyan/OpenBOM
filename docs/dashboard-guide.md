@@ -2,7 +2,8 @@
 
 The OpenBOM console is served by the backend at `http://<server>:8000/`. It is built with
 [Arco Design](https://arco.design) (React) and ships all assets locally, so it works offline and
-on air-gapped networks.
+on air-gapped networks. Pages and cards animate in, KPI numbers count up and severity bars fill in.
+All motion is switched off when the operating system asks for reduced motion (`prefers-reduced-motion`).
 
 ![Fleet overview](../assets/dashboard-overview.jpg)
 
@@ -24,9 +25,13 @@ to it; anything else searches packages across the fleet. The sun/moon button swi
 
 **Overview** — fleet KPIs (assets, packages, vulnerabilities, critical, KEV, malicious, IOC/typosquat,
 end-of-life, license violations, stale assets). Every card is clickable. Red/orange banners appear when
-known-malicious packages or KEV vulnerabilities are present. Below: severity distribution,
-highest-risk assets, recent scans (with their source: agent, sbom-upload, reanalysis), packages per
-ecosystem and coverage by target type.
+known-malicious packages or KEV vulnerabilities are present; the KEV banner reminds you that findings
+reflect each asset's *last pushed scan*. Below, in rows of equal-height cards:
+
+* **Severity distribution** (bar + one tile per severity, click a tile to open the filtered
+  vulnerability list) next to **Coverage** (scan targets by type, suppressing triage decisions, stale threshold),
+* **Highest-risk assets** next to **Packages by ecosystem**,
+* **Recent scans** across the full width (source: agent, sbom-upload, reanalysis; packages, critical, high, KEV).
 
 **Assets** — every host, image, repository, rootfs and imported SBOM. Filter by name and type, sort by
 risk, name, last seen or package count. Tags show the target type, **STALE** (no scan for
@@ -35,7 +40,7 @@ risk, name, last seen or package count. Tags show the target type, **STALE** (no
 * header actions: **Re-analyze** (re-match the stored inventory against fresh OSV/EPSS/KEV),
   **CycloneDX** (download the asset SBOM), **Decommission** (delete links and history; asks for confirmation),
 * tabs: **Vulnerabilities** (with severity filter, "show suppressed" switch and a **Triage** button per row),
-  **Packages** (search, ecosystem filter, license, purl), **Licenses** (policy violations reported by the agent),
+  **Packages** (search, ecosystem filter, license, **found in** path, purl), **Licenses** (policy violations reported by the agent),
   **End-of-life**, **Scan history** (trend of critical + high findings per scan).
 
 The **risk score** (0–100) saturates: each distinct vulnerability adds its severity weight
@@ -46,17 +51,41 @@ The **risk score** (0–100) saturates: each distinct vulnerability adds its sev
 
 **Threat Hunt** — five tabs, each listing affected assets with their findings:
 *Malicious packages* (OSV `MAL-*`), *CISA KEV*, *IOC & typosquat* (agent heuristics), *Critical*,
-*High EPSS* (slider for the minimum probability).
+*High EPSS* (slider for the minimum probability). Each finding shows the package, the fixed version and
+**where the package was found**. Each asset card shows when it was last scanned; hover it for the exact
+agent command that rescans that target.
 
 **Vulnerabilities** — every advisory present on at least one asset, highest risk first (malicious →
 heuristic → KEV → severity → EPSS). Filter by text (id, CVE, summary), severity and intel (malicious,
-KEV, IOC, EPSS ≥ 10 %); **Export CSV** respects the filters. Clicking a row opens the
-**vulnerability drawer**: summary, CVE links (NVD), CVSS, EPSS with percentile, KEV description,
-PoC/exploit links, triage state, and every affected host with installed and fixed version.
+KEV, IOC, EPSS ≥ 10 %). The **Affected package · asset · path** column lists the first five exposures:
+package, installed → fixed version, asset and the path it was found in. **Export CSV** respects the
+filters and includes a `found_in` column. Clicking a row opens the **vulnerability drawer**: summary,
+CVE links (NVD), CVSS, EPSS with percentile, KEV description, PoC/exploit links, triage state, and every
+affected host with installed version, fixed version and the full **Found in** path.
+
+![Vulnerabilities with package paths](../assets/dashboard-vulnerabilities.jpg)
 
 **Package Search** — "which assets have X installed right now?" Search by name (contains or exact),
-optional exact version and ecosystem. Results show license, vulnerability count/max severity and the
-hosts (click to open).
+optional exact version and ecosystem. Results show license, vulnerability count/max severity, and every
+asset with the path where it holds the package (click an asset to open it).
+
+#### Package paths ("Found in")
+
+Paths tell you *which* copy of a package to fix, for example the venv of one project inside a scanned
+repository tree. Long paths are shortened around the project and the file
+(`~/…/payments-api/venv/…/anyio-4.12.1.dist-info`). Hover a path, or open the vulnerability
+drawer, to see the full path.
+
+| Source | Path shown |
+|--------|------------|
+| Host pip packages | The `*.dist-info` directory (or the site-packages directory when `pip` belongs to another environment) |
+| Host global npm packages | `…/node_modules/<package>` |
+| `--path` / `--rootfs` | The manifest, lockfile, venv `METADATA` or archive, as an absolute path |
+| `--image` | Path inside the image |
+| OS packages (RPM/dpkg/apk), containers | None. Shown as *system package (package manager)*, because they live in the package-manager database |
+
+*Path not recorded* appears for language packages from scans made by agents that predate this feature. Re-run the agent
+on that target to fill it in.
 
 ### Govern
 
@@ -80,6 +109,11 @@ affected package purls. See [SBOM, VEX & Triage](sbom-and-vex.md) for the state 
 
 `not_affected` and `false_positive` hide the finding from views, counts and risk scores. Other states
 are shown as a tag next to the finding.
+
+`resolved` does **not** hide a finding. If the latest scan still contains the vulnerable version, the tag
+reads **resolved · still detected** and the drawer explains why. Upgrade the copy at the path shown, then
+re-run the agent on the same target (`--path`, `--image`, … as before). The finding then disappears
+because ingest is snapshot-based.
 
 ### Data
 
@@ -105,7 +139,8 @@ and SBOMs, and scheduling with cron (pre-filled with this server's URL), plus a 
 
 ## Security notes
 
-* Agent-supplied data (package names, summaries) is untrusted; the console renders it only as text.
+* Agent-supplied data (package names, summaries, paths) is untrusted; the console renders it only as text.
+* The console refuses to be framed (`frame-ancestors 'none'`, `X-Frame-Options: DENY`).
 * The page runs under `Content-Security-Policy: script-src 'self'` — no inline scripts, no eval, no
   third-party origins. Vendored library versions and licenses are listed in
   `server/static/vendor/LICENSES.md`.

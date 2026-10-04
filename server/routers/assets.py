@@ -92,14 +92,14 @@ async def get_asset_packages(
     db: AsyncSession = Depends(get_db),
 ) -> list[PackageOut]:
     asset = await _asset_or_404(db, hostname)
-    stmt = (select(Package).join(asset_package, asset_package.c.package_id == Package.id)
+    stmt = (select(Package, asset_package.c.location).join(asset_package, asset_package.c.package_id == Package.id)
             .where(asset_package.c.asset_id == asset.id))
     if ecosystem:
         stmt = stmt.where(Package.ecosystem.ilike(ecosystem))
     if q:
         stmt = stmt.where(Package.name.ilike(f"%{q}%"))
-    rows = (await db.execute(stmt.order_by(Package.ecosystem, Package.name).offset(offset).limit(limit))).scalars()
-    return [PackageOut.model_validate(p) for p in rows]
+    rows = (await db.execute(stmt.order_by(Package.ecosystem, Package.name).offset(offset).limit(limit))).all()
+    return [PackageOut.model_validate(p).model_copy(update={"location": loc}) for p, loc in rows]
 
 
 @router.get("/assets/{hostname}/vulnerabilities", response_model=list[AssetVulnerabilityOut])
@@ -114,14 +114,14 @@ async def get_asset_vulnerabilities(
     asset = await _asset_or_404(db, hostname)
     rows = (await db.execute(findings_query(Asset.id == asset.id, include_suppressed=include_suppressed))).all()
     grouped: dict[int, tuple[Any, list[AffectedPackageOut]]] = {}
-    for _asset, pkg, vuln, fixed, rec in rows:
+    for _asset, pkg, vuln, fixed, rec, loc in rows:
         if severity and (vuln.severity or "").upper() != severity.upper():
             continue
         if kev is not None and vuln.is_kev != kev:
             continue
         if heuristic is not None and vuln.is_heuristic != heuristic:
             continue
-        grouped.setdefault(vuln.id, (vuln, []))[1].append(affected_out(pkg, fixed, rec))
+        grouped.setdefault(vuln.id, (vuln, []))[1].append(affected_out(pkg, fixed, rec, loc))
     states = await triage_states(db, grouped.keys(), asset.id)
     out = [
         AssetVulnerabilityOut(**{**VulnerabilityOut.model_validate(v).model_dump(), "triage_state": states.get(v.id)},

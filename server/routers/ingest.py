@@ -10,9 +10,10 @@ from __future__ import annotations
 
 import json
 import logging
+import posixpath
 from collections.abc import Iterable, Iterator
 from datetime import datetime, timezone
-from typing import TypeVar
+from typing import Any, TypeVar
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import delete, select
@@ -56,6 +57,27 @@ def _vuln_key(v: VulnDetailIn, ecosystem: str, name: str) -> str:
 
 
 PKG_ATTRS = ("purl", "license", "osv_ecosystem", "osv_name", "osv_version")
+
+
+def _target_root(scan_target: dict[str, Any] | None) -> str | None:
+    """Directory that path/rootfs scan locations are relative to (agents report them relative to it)."""
+    if not scan_target or scan_target.get("type") not in ("path", "rootfs"):
+        return None
+    ref = str(scan_target.get("ref") or "")
+    return ref if ref.startswith("/") else None
+
+
+def _absolute_location(loc: str, root: str | None) -> str:
+    if root is None or loc.startswith("/"):
+        return loc
+    return posixpath.join(root, loc)
+
+
+def _join_locations(locs: list[str] | None) -> str | None:
+    """Same name/version can sit in several venvs/lockfiles of one tree — keep them all (bounded)."""
+    if not locs:
+        return None
+    return "\n".join(locs)[:4096]
 
 
 async def _resolve_packages(
@@ -162,9 +184,16 @@ async def _do_ingest(
     # --- Packages: snapshot of what is installed right now ---
     labels: dict[PkgKey, str | None] = {}
     attrs: dict[PkgKey, PackageIn] = {}
+    locations: dict[PkgKey, list[str]] = {}
+    root = _target_root(payload.scan_target)
     for p in payload.packages:
         labels[(p.name, p.version, p.ecosystem)] = p.diff_label
         attrs[(p.name, p.version, p.ecosystem)] = p
+        if p.location:
+            loc = _absolute_location(p.location, root)
+            locs = locations.setdefault((p.name, p.version, p.ecosystem), [])
+            if loc not in locs:
+                locs.append(loc)
     for finding in payload.osv_vulnerabilities or []:
         fp = finding.package
         labels.setdefault((fp.name, fp.version, fp.ecosystem), fp.diff_label)
@@ -179,7 +208,8 @@ async def _do_ingest(
 
     await db.execute(delete(asset_package).where(asset_package.c.asset_id == asset.id))
     link_rows = [
-        {"asset_id": asset.id, "package_id": pkg_map[k].id, "diff_label": label, "scan_ts": scan_ts or now}
+        {"asset_id": asset.id, "package_id": pkg_map[k].id, "diff_label": label, "scan_ts": scan_ts or now,
+         "location": _join_locations(locations.get(k))}
         for k, label in labels.items()
     ]
     for chunk in _chunks(link_rows):

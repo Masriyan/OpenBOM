@@ -33,6 +33,7 @@ class PackageIn(BaseModel):
     osv_ecosystem: str | None = Field(default=None, max_length=64)
     osv_name: str | None = Field(default=None, max_length=255)
     osv_version: str | None = Field(default=None, max_length=255)
+    location: str | None = Field(default=None, max_length=4096)
 
     @field_validator("license")
     @classmethod
@@ -145,6 +146,8 @@ class PackageOut(BaseModel):
     ecosystem: str
     license: str | None = None
     purl: str | None = None
+    # Where it was found on the asset (path/venv/lockfile); only set in per-asset views
+    location: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -152,6 +155,21 @@ class PackageOut(BaseModel):
 class AffectedPackageOut(PackageOut):
     fixed_version: str | None = None
     recommendation: str | None = None
+
+
+class HostLocationOut(BaseModel):
+    hostname: str
+    location: str | None = None
+
+
+class OccurrenceOut(BaseModel):
+    """One (asset, package) exposure of a vulnerability — what the vulnerability list shows inline."""
+    hostname: str
+    name: str
+    version: str
+    ecosystem: str
+    fixed_version: str | None = None
+    location: str | None = None
 
 
 class VulnerabilityOut(BaseModel):
@@ -294,6 +312,7 @@ class ThreatAssetOut(BaseModel):
 class PackageHostsOut(BaseModel):
     package: PackageOut
     hosts: list[str]
+    locations: list[HostLocationOut] = Field(default_factory=list)
     vulnerability_count: int = 0
     max_severity: str | None = None
 
@@ -301,6 +320,7 @@ class PackageHostsOut(BaseModel):
 class VulnerabilityListOut(VulnerabilityOut):
     affected_assets: int = 0
     affected_packages: int = 0
+    occurrences: list[OccurrenceOut] = Field(default_factory=list, description="First few exposures (host/package/path)")
 
 
 class AffectedAssetOut(BaseModel):

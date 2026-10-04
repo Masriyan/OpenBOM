@@ -146,6 +146,7 @@ names of at least 5 characters, with an allowlist of legitimate look-alikes (`TY
 | License policy violation | package metadata, deps.dev | Legal/compliance risk; enforced with `--license-deny` |
 | Delta labels | diff engine | Newly installed or downgraded packages are where supply-chain attacks land |
 | Stale asset | backend (`OPENBOM_STALE_DAYS`) | Inventory may no longer reflect reality |
+| Package location | agent (dist-info / node_modules / lockfile path) | Shows *which* copy to fix (one repo tree can hold many venvs) and spots packages living in unexpected places |
 
 ---
 

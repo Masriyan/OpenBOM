@@ -8,7 +8,7 @@
   const {
     Layout, Menu, Card, Grid, Statistic, Table, Tag, Progress, Tabs, Descriptions, Drawer, Modal, Message,
     Button, Space, Input, Select, Switch, Slider, Empty, Spin, Result, Alert, Typography, Tooltip, Badge,
-    Breadcrumb, Upload, Popconfirm, Divider, Form, Radio, Link,
+    Breadcrumb, Upload, Popconfirm, Divider, Form, Radio, Link, Skeleton,
   } = arco;
   const I = arcoicon;
   const { Row, Col } = Grid;
@@ -25,6 +25,8 @@
   const JUSTIFICATIONS = ["component_not_present", "vulnerable_code_not_present", "vulnerable_code_not_in_execute_path",
                           "vulnerable_code_cannot_be_controlled_by_adversary", "inline_mitigations_already_exist"];
   const enc = encodeURIComponent;
+  const RESOLVED_HINT = "Marked resolved, but the latest scan of this asset still contains the vulnerable version. Upgrade it at the path shown, then re-run the agent on the same target. (Only not_affected / false_positive hide a finding.)";
+  const NO_PATH_HINT = "No path recorded: OS packages live in the package-manager database, and scans from agents older than this release did not send paths — re-run the agent to record them.";
 
   const store = {
     get(k, d = "") { try { return localStorage.getItem(k) ?? d; } catch { return d; } },
@@ -90,6 +92,7 @@
     return [cols.map((c) => c[0]).join(","), ...rows.map((r) => cols.map((c) => esc(c[1](r))).join(","))].join("\n");
   }
   const fileSafe = (s) => String(s).replace(/[^\w.-]+/g, "_");
+  const reducedMotion = () => { try { return matchMedia("(prefers-reduced-motion: reduce)").matches; } catch { return false; } };
 
   // ------------------------------------------------------------------ small components
   const SevTag = ({ s }) => { s = (s || "UNKNOWN").toUpperCase(); if (!SEVS.includes(s)) s = "UNKNOWN"; return html`<${Tag} color=${SEV_COLOR[s]} bordered size="small">${s}<//>`; };
@@ -99,7 +102,8 @@
     if (v.is_kev) tags.push(html`<${Tooltip} key="k" content="CISA Known Exploited Vulnerability"><${Tag} color="red" size="small" icon=${html`<${I.IconFire} />`}>KEV<//><//>`);
     if (v.is_heuristic) tags.push(html`<${Tag} key="h" color="purple" size="small">${String(v.vuln_id).startsWith("TYPOSQUAT") ? "TYPOSQUAT" : "IOC"}<//>`);
     if (v.poc_links && v.poc_links.length) tags.push(html`<${Tag} key="p" color="gold" size="small">PoC ${v.poc_links.length}<//>`);
-    if (v.triage_state) tags.push(html`<${Tag} key="t" color=${TRIAGE_COLOR[v.triage_state] || "gray"} size="small">${v.triage_state}<//>`);
+    if (v.triage_state === "resolved") tags.push(html`<${Tooltip} key="t" content=${RESOLVED_HINT}><${Tag} color="orange" size="small" icon=${html`<${I.IconExclamationCircle} />`}>resolved · still detected<//><//>`);
+    else if (v.triage_state) tags.push(html`<${Tag} key="t" color=${TRIAGE_COLOR[v.triage_state] || "gray"} size="small">${v.triage_state}<//>`);
     return tags.length ? html`<${Space} size=${4} wrap>${tags}<//>` : html`<span class="ob-muted">—</span>`;
   }
   const Epss = ({ v }) => v == null ? html`<span class="ob-muted">—</span>`
@@ -134,11 +138,11 @@
   }
   function Kpi({ title, value, tone = "blue", onClick, suffix, icon }) {
     return html`<${Card} className=${`ob-kpi t-${tone}${onClick ? " clickable" : ""}`} bordered hoverable=${!!onClick} onClick=${onClick}>
-      <${Statistic} title=${html`<span>${icon ? html`<span style=${{ marginRight: 6 }}>${icon}</span>` : null}${title}</span>`} value=${value ?? 0} suffix=${suffix} groupSeparator />
+      <${Statistic} title=${html`<span>${icon ? html`<span style=${{ marginRight: 6 }}>${icon}</span>` : null}${title}</span>`} value=${value ?? 0} suffix=${suffix} groupSeparator countUp=${!reducedMotion()} countDuration=${900} />
     <//>`;
   }
   function Loader({ q, children }) {
-    if (q.loading && !q.data) return html`<div style=${{ padding: 60, textAlign: "center" }}><${Spin} size=${32} tip="Loading…" /></div>`;
+    if (q.loading && !q.data) return html`<div class="ob-skeleton"><${Skeleton} animation text=${{ rows: 5, width: ["60%", "100%", "92%", "84%", "70%"] }} /></div>`;
     if (q.error) {
       if (q.error.status === 401) return html`<${Result} status="403" title="API key required" subTitle=${q.error.message} extra=${html`<${Button} type="primary" onClick=${() => go("#/settings")}>Open Settings<//>`} />`;
       if (q.error.status === 404) return html`<${Result} status="404" title="Not found" subTitle=${q.error.message} extra=${html`<${Button} onClick=${() => history.back()}>Back<//>`} />`;
@@ -153,6 +157,31 @@
     return label === id ? link : html`<${Tooltip} content=${id}>${link}<//>`;
   };
   const HostLink = ({ h }) => html`<${Link} onClick=${(e) => { e.stopPropagation(); go(`#/asset/${enc(h)}`); }}>${h}<//>`;
+  // Where a package was found (path/rootfs/image scans) — answers "I fixed it, why is it still here?"
+  // Shorten long paths without hiding what matters: the project/venv and the file. Uninformative segments
+  // (lib, python3.x, site-packages) collapse first, then leading directories. The tooltip has the full path.
+  const BORING_SEGMENT = /^(lib|lib64|python\d[\d.]*|site-packages|dist-packages)$/;
+  function shortPath(path, max = 60) {
+    const out = String(path).replace(/^\/home\/[^/]+/, "~").replace(/^\/root(?=\/|$)/, "~").split("/");
+    if (out.length > 2 && out[out.length - 1] === "METADATA" && /\.(dist|egg)-info$/.test(out[out.length - 2])) out.pop();
+    const render = () => out.filter((x, i) => !(x === "…" && out[i - 1] === "…")).join("/");
+    while (render().length > max) {
+      let i = out.findIndex((x, k) => k > 0 && k < out.length - 1 && BORING_SEGMENT.test(x));
+      if (i < 0) i = out.findIndex((x, k) => k > 0 && k < out.length - 3 && x !== "…");
+      if (i < 0) break;
+      out[i] = "…";
+    }
+    return render();
+  }
+  const OS_ECOSYSTEM = /^(RPM|Debian|Ubuntu|Alpine)$|-(RPM|DEB|APK)$/;
+  function FoundIn({ loc, placeholder, wrap, eco }) {
+    if (!loc && placeholder && OS_ECOSYSTEM.test(eco || "")) return html`<span class="ob-muted">system package (package manager)</span>`;
+    if (!loc) return placeholder ? html`<${Tooltip} content=${NO_PATH_HINT}><span class="ob-muted ob-hint">path not recorded</span><//>` : null;
+    const all = String(loc).split("\n").filter(Boolean);
+    const shown = all.slice(0, 2);
+    return html`<div class=${`ob-loc${wrap ? " ob-loc-wrap" : ""}`}>${shown.map((l) => html`<${Tooltip} key=${l} content=${l}><div class="ob-loc-line"><${I.IconFolder} /> <span class="ob-mono">${wrap ? l.replace(/^\/home\/[^/]+/, "~") : shortPath(l)}</span></div><//>`)}
+      ${all.length > shown.length ? html`<${Tooltip} content=${html`<div>${all.slice(2).map((l) => html`<div key=${l} class="ob-mono">${l}</div>`)}</div>`}><span class="ob-muted">+${all.length - shown.length} more location(s)</span><//>` : null}</div>`;
+  }
 
   // ------------------------------------------------------------------ vulnerability drawer + triage
   function TriageModal({ visible, vuln, hostname, onClose, onSaved }) {
@@ -180,11 +209,12 @@
   function VulnDrawer({ id, onClose, onChanged }) {
     const q = useApi(id ? `/api/v1/vulnerabilities/${enc(id)}` : null);
     const [triage, setTriage] = useState(false);
-    return html`<${Drawer} width=${720} visible=${!!id} onCancel=${onClose} footer=${null} unmountOnExit
+    return html`<${Drawer} width=${Math.min(920, window.innerWidth - 24)} visible=${!!id} onCancel=${onClose} footer=${null} unmountOnExit
         title=${html`<${Space}><span class="ob-mono">${id}</span>${q.data ? html`<${SevTag} s=${q.data.vulnerability.severity} />` : null}<//>`}>
       <${Loader} q=${q}>${(d) => {
         const v = d.vulnerability;
         return html`<div class="ob-section-gap">
+          ${v.triage_state === "resolved" && d.affected.length ? html`<${Alert} type="warning" showIcon title=${`Marked resolved, still detected on ${new Set(d.affected.map((a) => a.hostname)).size} asset(s)`} content=${RESOLVED_HINT} />` : null}
           ${v.is_malicious ? html`<${Alert} type="error" title="Known malicious package" content="Remove it immediately and treat affected hosts as compromised (rotate credentials, investigate)." />` : null}
           <${Space} wrap><${Intel} v=${v} />
             ${!v.is_heuristic ? html`<${Button} size="small" icon=${html`<${I.IconLaunch} />`} href=${`https://osv.dev/vulnerability/${enc(v.vuln_id)}`} target="_blank">OSV.dev<//>` : null}
@@ -202,10 +232,11 @@
           ]} />
           <${Card} title=${`Affected assets (${d.affected.length})`} size="small" bordered>
             <${Table} size="small" rowKey=${(r) => `${r.hostname}|${r.package.id}`} data=${d.affected} pagination=${d.affected.length > 10 ? { pageSize: 10 } : false} columns=${[
-              { title: "Host", dataIndex: "hostname", render: (h) => html`<${HostLink} h=${h} />` },
-              { title: "Package", render: (_, r) => html`<span><span class="ob-mono">${r.package.name}</span> <${Tag} size="small">${r.package.ecosystem}<//></span>` },
-              { title: "Installed", render: (_, r) => html`<span class="ob-mono">${r.package.version}</span>` },
-              { title: "Fix", render: (_, r) => r.package.fixed_version ? html`<${Tag} color="green" size="small">${r.package.fixed_version}<//>` : html`<span class="ob-muted">none</span>` },
+              { title: "Host", dataIndex: "hostname", width: 150, render: (h) => html`<span class="ob-nowrap"><${HostLink} h=${h} /></span>` },
+              { title: "Package", width: 170, render: (_, r) => html`<span class="ob-nowrap"><span class="ob-mono">${r.package.name}</span> <${Tag} size="small">${r.package.ecosystem}<//></span>` },
+              { title: "Installed", width: 100, render: (_, r) => html`<span class="ob-mono ob-nowrap">${r.package.version}</span>` },
+              { title: "Fix", width: 90, render: (_, r) => r.package.fixed_version ? html`<${Tag} color="green" size="small">${r.package.fixed_version}<//>` : html`<span class="ob-muted ob-nowrap">none</span>` },
+              { title: "Found in", render: (_, r) => html`<${FoundIn} loc=${r.package.location} eco=${r.package.ecosystem} placeholder wrap />` },
             ]} noDataElement=${html`<${Empty} description="No longer installed anywhere" />`} />
           <//>
           <${TriageModal} visible=${triage} vuln=${v} onClose=${() => setTriage(false)} onSaved=${() => { q.reload(); onChanged && onChanged(); }} />
@@ -220,11 +251,31 @@
       sorter: (a, b) => SEVS.indexOf(a.severity) - SEVS.indexOf(b.severity) },
     { title: "CVSS", dataIndex: "cvss_score", width: 70, render: (c) => c ?? html`<span class="ob-muted">—</span>`, sorter: (a, b) => (a.cvss_score || 0) - (b.cvss_score || 0) },
     { title: "EPSS", dataIndex: "epss_score", width: 80, render: (e) => html`<${Epss} v=${e} />`, sorter: (a, b) => (a.epss_score || 0) - (b.epss_score || 0) },
-    { title: "Intel", width: 170, render: (_, v) => html`<${Intel} v=${v} />` },
-    ...(withPkgs ? [{ title: "Package → fix", render: (_, v) => html`<div>${(v.affected_packages || []).map((p) => html`<div key=${p.id}><span class="ob-mono">${p.name}</span> <span class="ob-muted">${p.version}</span>${p.fixed_version ? html` → <${Tag} size="small" color="green">${p.fixed_version}<//>` : null}</div>`)}</div>` }] : []),
-    { title: "Summary", dataIndex: "summary", render: (s) => html`<${Tooltip} content=${s}><span class="ob-trunc">${s}</span><//>` },
+    { title: "Intel", width: 150, render: (_, v) => html`<${Intel} v=${v} />` },
+    ...(withPkgs ? [{ title: "Package → fix · path", width: 440, render: (_, v) => html`<div class="ob-occ">${(v.affected_packages || []).map((p) => html`<div key=${p.id} class="ob-occ-item">
+      <div class="ob-nowrap"><span class="ob-mono">${p.name}</span> <span class="ob-muted">${p.version}</span>${p.fixed_version ? html` → <${Tag} size="small" color="green">${p.fixed_version}<//>` : null}</div>
+      <${FoundIn} loc=${p.location} /></div>`)}</div>` }] : []),
+    { title: "Summary", dataIndex: "summary", render: (s) => html`<${Tooltip} content=${s}><span class="ob-clamp">${s}</span><//>` },
     ...(onTriage ? [{ title: "", width: 80, render: (_, v) => html`<${Button} size="mini" onClick=${(e) => { e.stopPropagation(); onTriage(v); }}>Triage<//>` }] : []),
   ];
+
+  function Occurrences({ v }) {
+    const occ = v.occurrences || [];
+    const extra = Math.max(0, (v.affected_packages || 0) - occ.length);
+    return html`<div class="ob-occ">${occ.map((o) => html`<div key=${`${o.hostname}|${o.name}|${o.version}`} class="ob-occ-item">
+        <div><span class="ob-mono">${o.name}</span> <span class="ob-muted">${o.version}</span>${o.fixed_version ? html` → <${Tag} size="small" color="green">${o.fixed_version}<//>` : null}
+          <span class="ob-muted"> · </span><${HostLink} h=${o.hostname} /></div>
+        <${FoundIn} loc=${o.location} eco=${o.ecosystem} placeholder /></div>`)}
+      ${extra ? html`<span class="ob-muted">+${extra} more — open for full list</span>` : null}</div>`;
+  }
+  const vulnListColumns = (onOpen) => {
+    const base = vulnColumns(onOpen, false).filter((c) => c.title !== "Summary");
+    return [...base,
+      { title: "Affected package · asset · path", width: 500, render: (_, v) => html`<${Occurrences} v=${v} />` },
+      { title: "Summary", dataIndex: "summary", width: 300, render: (s) => html`<${Tooltip} content=${s}><span class="ob-clamp">${s}</span><//>` },
+      { title: "Assets", dataIndex: "affected_assets", width: 80, sorter: (a, b) => a.affected_assets - b.affected_assets },
+    ];
+  };
 
   // ------------------------------------------------------------------ pages
   function Overview() {
@@ -233,7 +284,7 @@
       <${PageHead} title="Fleet overview" sub="Exposure currently installed across every managed asset, image, repository and imported SBOM." icon=${html`<${I.IconDashboard} />`}
         extra=${html`<${Button} icon=${html`<${I.IconRefresh} />`} onClick=${q.reload}>Refresh<//>`} />
       ${s.malicious_packages ? html`<${Alert} className="ob-hero-alert" type="error" showIcon title=${`${s.malicious_packages} known-malicious package(s) installed`} content="OpenSSF malicious-package advisories matched installed software. Treat affected hosts as compromised." action=${html`<${Button} size="small" status="danger" onClick=${() => go("#/threats/malicious")}>Investigate<//>`} />` : null}
-      ${s.kev_vulnerabilities ? html`<${Alert} className="ob-hero-alert" type="warning" showIcon title=${`${s.kev_vulnerabilities} actively exploited vulnerabilit${s.kev_vulnerabilities === 1 ? "y" : "ies"} (CISA KEV)`} action=${html`<${Button} size="small" onClick=${() => go("#/threats/kev")}>View<//>`} />` : null}
+      ${s.kev_vulnerabilities ? html`<${Alert} className="ob-hero-alert" type="warning" showIcon title=${`${s.kev_vulnerabilities} actively exploited vulnerabilit${s.kev_vulnerabilities === 1 ? "y" : "ies"} (CISA KEV)`} content="Already patched? Findings reflect each asset's last pushed scan — re-run the agent on that same target to clear them." action=${html`<${Button} size="small" onClick=${() => go("#/threats/kev")}>View<//>`} />` : null}
       <div class="ob-kpi-grid c5">
         ${[["Assets", s.total_assets, "blue", "#/assets", html`<${I.IconDesktop} />`],
            ["Packages", s.total_packages, "gray", "#/packages", html`<${I.IconApps} />`],
@@ -247,35 +298,43 @@
            ["Stale assets", s.stale_assets, "gray", "#/assets", html`<${I.IconClockCircle} />`],
           ].map(([t, v, tone, href, icon]) => html`<${Kpi} key=${t} title=${t} value=${v} tone=${tone} icon=${icon} onClick=${() => go(href)} />`)}
       </div>
-      <${Card} title="Severity distribution" style=${{ marginTop: 14 }} bordered><${SevBar} counts=${s.severity_breakdown} /><//>
-      <${Row} gutter=${14} style=${{ marginTop: 14 }}>
-        <${Col} xs=${24} lg=${12}><${Card} title="Highest-risk assets" bordered extra=${html`<${Link} onClick=${() => go("#/assets?sort=risk")}>All assets<//>`}>
-          <${Table} className="ob-click-row" size="small" pagination=${false} rowKey="hostname" data=${s.top_risky_assets} onRow=${(r) => ({ onClick: () => go(`#/asset/${enc(r.hostname)}`) })} columns=${[
-            { title: "Asset", dataIndex: "hostname", render: (h, r) => html`<${Space}><${TargetTag} t=${r.target_type} />${h}<//>` },
-            { title: "Risk", dataIndex: "risk_score", width: 150, render: (r) => html`<${Risk} score=${r} />` },
-            { title: "KEV", dataIndex: "kev_count", width: 60 }, { title: "Malware", dataIndex: "malicious_count", width: 80 },
-            { title: "Crit", dataIndex: "critical", width: 60 }]} noDataElement=${html`<${Empty} description="No vulnerable assets" />`} />
+      <${Row} gutter=${14} className="ob-eq" style=${{ marginTop: 14 }}>
+        <${Col} xs=${24} xl=${15} xxl=${16}><${Card} title="Severity distribution" bordered extra=${html`<${Link} onClick=${() => go("#/vulns")}>All vulnerabilities<//>`}>
+          <${SevBar} counts=${s.severity_breakdown} />
+          <div class="ob-sev-tiles">${SEVS.map((sv) => html`<div key=${sv} class="ob-sev-tile" style=${{ "--tone": SEV_HEX[sv] }} onClick=${() => go(`#/vulns?severity=${sv}`)}>
+            <span class="ob-muted">${sv}</span><b>${(s.severity_breakdown?.[sv] || 0).toLocaleString()}</b></div>`)}</div>
         <//><//>
-        <${Col} xs=${24} lg=${12}><${Card} title="Recent scans" bordered>
-          <${Table} className="ob-click-row" size="small" pagination=${false} rowKey=${(r) => r.hostname + r.received_at} data=${s.recent_scans} onRow=${(r) => ({ onClick: () => go(`#/asset/${enc(r.hostname)}`) })} columns=${[
-            { title: "Asset", dataIndex: "hostname" }, { title: "When", dataIndex: "received_at", render: ago },
-            { title: "Source", dataIndex: "source", render: (x) => html`<${Tag} size="small">${x}<//>` },
-            { title: "Pkgs", dataIndex: "total_packages" }, { title: "Crit", dataIndex: "critical" }, { title: "KEV", dataIndex: "kev_hits" }]}
-            noDataElement=${html`<${Empty} description="No scans yet — run the agent with --server-url" />`} />
-        <//><//>
-      <//>
-      <${Row} gutter=${14} style=${{ marginTop: 14 }}>
-        <${Col} xs=${24} lg=${12}><${Card} title="Packages by ecosystem" bordered>
-          ${(() => { const e = Object.entries(s.ecosystem_breakdown).sort((a, b) => b[1] - a[1]); const max = Math.max(1, ...e.map((x) => x[1]));
-            return e.length ? e.map(([k, v]) => html`<div key=${k} style=${{ marginBottom: 8 }}><div style=${{ display: "flex", justifyContent: "space-between" }}><span>${k}</span><b class="ob-mono">${v.toLocaleString()}</b></div><${Progress} percent=${(v / max) * 100} showText=${false} size="small" /></div>`) : html`<${Empty} />`; })()}
-        <//><//>
-        <${Col} xs=${24} lg=${12}><${Card} title="Coverage" bordered>
+        <${Col} xs=${24} xl=${9} xxl=${8}><${Card} title="Coverage" bordered>
           <${Descriptions} column=${1} size="small" data=${[
             { label: "Scan targets", value: html`<${Space} wrap>${Object.entries(s.target_breakdown || {}).map(([k, v]) => html`<span key=${k}><${TargetTag} t=${k} /> ${v}</span>`)}<//>` },
-            { label: "Triage decisions suppressing findings", value: s.suppressed_decisions },
+            { label: "Suppressing decisions", value: s.suppressed_decisions },
             { label: "Stale threshold", value: `${s.stale_after_days} days without a scan` },
           ]} />
         <//><//>
+      <//>
+      <${Row} gutter=${14} className="ob-eq" style=${{ marginTop: 14 }}>
+        <${Col} xs=${24} xl=${14}><${Card} title="Highest-risk assets" bordered extra=${html`<${Link} onClick=${() => go("#/assets?sort=risk")}>All assets<//>`}>
+          <${Table} className="ob-click-row" size="small" pagination=${false} rowKey="hostname" data=${s.top_risky_assets} scroll=${{ x: 500 }} onRow=${(r) => ({ onClick: () => go(`#/asset/${enc(r.hostname)}`) })} columns=${[
+            { title: "Asset", dataIndex: "hostname", render: (h, r) => html`<${Space}><${TargetTag} t=${r.target_type} /><span class="ob-trunc ob-trunc-sm">${h}</span><//>` },
+            { title: "Risk", dataIndex: "risk_score", width: 136, render: (r) => html`<${Risk} score=${r} />` },
+            { title: "KEV", dataIndex: "kev_count", width: 58, align: "center", render: (n) => n ? html`<${Tag} color="red" size="small">${n}<//>` : 0 },
+            { title: "Malware", dataIndex: "malicious_count", width: 84, align: "center", render: (n) => n ? html`<${Tag} color="magenta" size="small">${n}<//>` : 0 },
+            { title: "Crit", dataIndex: "critical", width: 58, align: "center" }]} noDataElement=${html`<${Empty} description="No vulnerable assets" />`} />
+        <//><//>
+        <${Col} xs=${24} xl=${10}><${Card} title="Packages by ecosystem" bordered>
+          ${(() => { const e = Object.entries(s.ecosystem_breakdown).sort((a, b) => b[1] - a[1]); const max = Math.max(1, ...e.map((x) => x[1]));
+            return e.length ? html`<div class="ob-eco">${e.map(([k, v]) => html`<div key=${k} class="ob-eco-row"><span class="ob-eco-name">${k}</span>
+              <div class="ob-eco-bar"><div style=${{ width: `${Math.max(2, (v / max) * 100)}%` }} /></div><b class="ob-mono">${v.toLocaleString()}</b></div>`)}</div>` : html`<${Empty} />`; })()}
+        <//><//>
+      <//>
+      <${Card} title="Recent scans" bordered style=${{ marginTop: 14 }}>
+        <${Table} className="ob-click-row" size="small" pagination=${false} rowKey=${(r) => r.hostname + r.received_at} data=${s.recent_scans} onRow=${(r) => ({ onClick: () => go(`#/asset/${enc(r.hostname)}`) })} columns=${[
+          { title: "Asset", dataIndex: "hostname" }, { title: "When", dataIndex: "received_at", width: 120, render: ago },
+          { title: "Source", dataIndex: "source", width: 120, render: (x) => html`<${Tag} size="small">${x}<//>` },
+          { title: "Packages", dataIndex: "total_packages", width: 110, render: (n) => (n || 0).toLocaleString() },
+          { title: "Critical", dataIndex: "critical", width: 90 }, { title: "High", dataIndex: "high", width: 80, render: (n) => n ?? "—" },
+          { title: "KEV", dataIndex: "kev_hits", width: 70, render: (n) => n ? html`<${Tag} color="red" size="small">${n}<//>` : 0 }]}
+          noDataElement=${html`<${Empty} description="No scans yet — run the agent with --server-url" />`} />
       <//>
     </div>`}<//>`;
   }
@@ -372,7 +431,7 @@
         <${Select} style=${{ width: 160 }} value=${sev} onChange=${setSev} options=${[{ label: "All severities", value: "" }, ...SEVS.map((s) => ({ label: s, value: s }))]} />
         <${Switch} checked=${supp} onChange=${setSupp} /> <span class="ob-muted">show suppressed (triaged not_affected / false_positive)</span>
       <//>
-      <${Loader} q=${q}>${(rows) => html`<${Table} className="ob-click-row" size="small" rowKey="id" data=${rows} scroll=${{ x: 1100 }} pagination=${{ pageSize: 25, showTotal: true }}
+      <${Loader} q=${q}>${(rows) => html`<${Table} className="ob-click-row" size="small" rowKey="id" data=${rows} scroll=${{ x: 1300 }} pagination=${{ pageSize: 25, showTotal: true }}
         onRow=${(r) => ({ onClick: () => onOpen(r.vuln_id) })} columns=${vulnColumns(onOpen, true, setTriage)} noDataElement=${html`<${Empty} description="No open vulnerabilities" />`} />`}<//>
       <${TriageModal} visible=${!!triage} vuln=${triage} hostname=${hostname} onClose=${() => setTriage(null)} onSaved=${() => { q.reload(); onChanged(); }} />
     </div>`;
@@ -392,7 +451,8 @@
           { title: "Version", dataIndex: "version", render: (v) => html`<span class="ob-mono">${v}</span>` },
           { title: "Ecosystem", dataIndex: "ecosystem", render: (e) => html`<${Tag} size="small">${e}<//>` },
           { title: "License", dataIndex: "license", render: (l) => l ? html`<${LicenseTag} l=${l} />` : html`<span class="ob-muted">unknown</span>` },
-          { title: "purl", dataIndex: "purl", render: (p) => html`<span class="ob-mono ob-muted ob-trunc">${p || ""}</span>` }]} />`; }}<//>
+          { title: "Found in", dataIndex: "location", render: (l) => l ? html`<${FoundIn} loc=${l} />` : html`<span class="ob-muted">—</span>` },
+          { title: "purl", dataIndex: "purl", render: (p) => html`<span class="ob-mono ob-muted ob-trunc ob-trunc-sm">${p || ""}</span>` }]} />`; }}<//>
     </div>`;
   }
 
@@ -419,6 +479,13 @@
     { title: "Latest", dataIndex: "latest", render: (l) => l || "—" },
   ];
 
+  const rescanHint = (a) => {
+    const t = a.target_type || "host";
+    const target = t === "path" ? `--path ${a.target_ref || "<dir>"}` : t === "image" ? `--image ${a.target_ref || "<image>"}`
+      : t === "rootfs" ? `--rootfs ${a.target_ref || "<dir>"}` : t === "sbom" ? `--sbom <file>` : "--check-osv";
+    return `Fixed it? Findings stay until this target is scanned again: openbom_agent.py ${target} --server-url ${location.origin}`;
+  };
+
   function Threats({ kind, params }) {
     const [minEpss, setMinEpss] = useState(Number(params.get("min") || 0.1));
     const [open, setOpen] = useState(null);
@@ -432,7 +499,7 @@
                    heuristics: "Agent-side detections: obfuscated exec, reverse shells, install-hook downloaders, typosquats.",
                    critical: "CVSS ≥ 9.0 or vendor-rated critical.", "high-epss": "Likely to be exploited in the next 30 days (FIRST EPSS)." };
     return html`<div>
-      <${PageHead} title="Threat hunt" sub=${desc[kind]} icon=${html`<${I.IconSafe} />`} />
+      <${PageHead} title="Threat hunt" sub=${desc[kind]} icon=${html`<${I.IconSafe} />`} extra=${html`<${Button} icon=${html`<${I.IconRefresh} />`} onClick=${q.reload}>Refresh<//>`} />
       <${Tabs} type="card-gutter" activeTab=${kind} onChange=${(k) => go(`#/threats/${k}`)}>
         ${tabs.map(([k, t, icon]) => html`<${TabPane} key=${k} title=${html`<span>${icon} ${t}</span>`} />`)}
       <//>
@@ -440,8 +507,9 @@
         <${Slider} style=${{ width: 260 }} min=${0} max=${1} step=${0.01} value=${minEpss} onChange=${setMinEpss} formatTooltip=${(v) => `${Math.round(v * 100)}%`} />
         <${Tag}>${Math.round(minEpss * 100)}%<//><//><//>` : null}
       <${Loader} q=${q}>${(data) => data.length ? data.map((t) => html`<${Card} key=${t.asset.hostname} bordered style=${{ marginBottom: 14 }}
-          title=${html`<${Space}><${HostLink} h=${t.asset.hostname} /><span class="ob-muted">${t.findings.length} finding(s)</span><//>`} extra=${html`<span class="ob-muted">${t.asset.os_name || ""}</span>`}>
-          <${Table} className="ob-click-row" size="small" rowKey=${(r) => r.vuln_id} pagination=${t.findings.length > 10 ? { pageSize: 10 } : false} scroll=${{ x: 1000 }}
+          title=${html`<${Space}><${TargetTag} t=${t.asset.target_type} /><${HostLink} h=${t.asset.hostname} /><span class="ob-muted">${t.findings.length} finding(s)</span><//>`}
+          extra=${html`<${Tooltip} content=${rescanHint(t.asset)}><span class="ob-muted ob-hint"><${I.IconHistory} /> last scan ${ago(t.asset.last_seen)}</span><//>`}>
+          <${Table} className="ob-click-row" size="small" rowKey=${(r) => r.vuln_id} pagination=${t.findings.length > 10 ? { pageSize: 10 } : false} scroll=${{ x: 1300 }}
             data=${t.findings.map((f) => ({ ...f.vulnerability, affected_packages: f.affected_packages }))} onRow=${(r) => ({ onClick: () => setOpen(r.vuln_id) })} columns=${vulnColumns(setOpen, true)} />
         <//>`) : html`<${Card} bordered><${Result} status="success" title="Nothing matches" subTitle="No asset currently has findings in this category." /><//>`}<//>
       <${VulnDrawer} id=${open} onClose=${() => setOpen(null)} onChanged=${q.reload} />
@@ -461,7 +529,9 @@
     const exportCsv = () => q.data && download("openbom_vulnerabilities.csv", toCsv(q.data, [
       ["vuln_id", (v) => v.vuln_id], ["severity", (v) => v.severity], ["cvss", (v) => v.cvss_score], ["epss", (v) => v.epss_score],
       ["kev", (v) => v.is_kev], ["malicious", (v) => v.is_malicious], ["heuristic", (v) => v.is_heuristic], ["cves", (v) => v.cves.join(" ")],
-      ["affected_assets", (v) => v.affected_assets], ["triage", (v) => v.triage_state], ["summary", (v) => v.summary]]), "text/csv");
+      ["affected_assets", (v) => v.affected_assets], ["triage", (v) => v.triage_state],
+      ["found_in", (v) => (v.occurrences || []).map((o) => `${o.hostname}:${o.name}@${o.version}${o.location ? ` (${o.location.replace(/\n/g, "; ")})` : ""}`).join(" | ")],
+      ["summary", (v) => v.summary]]), "text/csv");
     return html`<div>
       <${PageHead} title="Vulnerabilities" sub="Every advisory present on at least one asset, highest risk first." icon=${html`<${I.IconBug} />`}
         extra=${html`<${Button} icon=${html`<${I.IconExport} />`} onClick=${exportCsv}>Export CSV<//>`} />
@@ -472,10 +542,8 @@
           <${Select} style=${{ width: 160 }} value=${flag} onChange=${setFlag} options=${[{ label: "Any intel", value: "" }, { label: "Malicious only", value: "malicious" }, { label: "KEV only", value: "kev" }, { label: "IOC only", value: "ioc" }, { label: "EPSS ≥ 10%", value: "epss" }]} />
           <${Switch} checked=${supp} onChange=${setSupp} /><span class="ob-muted">include suppressed</span>
         <//>
-        <${Loader} q=${q}>${(rows) => html`<${Table} className="ob-click-row" size="small" rowKey="id" data=${rows} scroll=${{ x: 1100 }} pagination=${{ pageSize: 25, showTotal: true, sizeCanChange: true }}
-          onRow=${(r) => ({ onClick: () => setOpen(r.vuln_id) })} columns=${[...vulnColumns(setOpen, false),
-            { title: "Assets", dataIndex: "affected_assets", width: 80, sorter: (a, b) => a.affected_assets - b.affected_assets },
-            { title: "Pkgs", dataIndex: "affected_packages", width: 70 }]} />`}<//>
+        <${Loader} q=${q}>${(rows) => html`<${Table} className="ob-click-row" size="small" rowKey="id" data=${rows} scroll=${{ x: 1400 }} pagination=${{ pageSize: 25, showTotal: true, sizeCanChange: true }}
+          onRow=${(r) => ({ onClick: () => setOpen(r.vuln_id) })} columns=${vulnListColumns(setOpen)} />`}<//>
       <//>
       <${VulnDrawer} id=${open} onClose=${() => { setOpen(null); if (params.get("open")) history.replaceState(null, "", "#/vulns"); }} onChanged=${q.reload} />
     </div>`;
@@ -505,7 +573,8 @@
           { title: "Ecosystem", render: (_, r) => html`<${Tag} size="small">${r.package.ecosystem}<//>` },
           { title: "License", render: (_, r) => r.package.license ? html`<${LicenseTag} l=${r.package.license} />` : html`<span class="ob-muted">—</span>` },
           { title: "Vulns", render: (_, r) => r.vulnerability_count ? html`<${Space}><${SevTag} s=${r.max_severity} />${r.vulnerability_count}<//>` : html`<span class="ob-muted">0</span>` },
-          { title: "Assets", render: (_, r) => html`<${Space} wrap size=${4}>${r.hosts.map((h) => html`<${Tag} key=${h} size="small" color="arcoblue" style=${{ cursor: "pointer" }} onClick=${() => go(`#/asset/${enc(h)}`)}>${h}<//>`)}<//>` }]}
+          { title: "Assets · path", render: (_, r) => html`<div class="ob-occ">${(r.locations && r.locations.length ? r.locations : r.hosts.map((h) => ({ hostname: h })))
+              .map((h) => html`<div key=${h.hostname} class="ob-occ-item"><${Tag} size="small" color="arcoblue" style=${{ cursor: "pointer" }} onClick=${() => go(`#/asset/${enc(h.hostname)}`)}>${h.hostname}<//><${FoundIn} loc=${h.location} eco=${r.package.ecosystem} placeholder /></div>`)}</div>` }]}
           noDataElement=${html`<${Empty} description="No asset has a matching package" />`} />`}<//>`}<//>
     </div>`;
   }
@@ -782,7 +851,7 @@
           <${Tooltip} content=${dark ? "Light theme" : "Dark theme"}><${Button} shape="circle" type="text" icon=${dark ? html`<${I.IconSunFill} />` : html`<${I.IconMoonFill} />`} onClick=${() => setDark(!dark)} /><//>
           <${Tooltip} content="API docs"><${Button} shape="circle" type="text" icon=${html`<${I.IconQuestionCircle} />`} href="/docs" target="_blank" /><//>
         <//>
-        <${Content} className="ob-content">${body}<//>
+        <${Content} className="ob-content"><div class="ob-page" key=${route.parts.join("/") || "overview"}>${body}</div><//>
       <//>
     <//>`;
   }

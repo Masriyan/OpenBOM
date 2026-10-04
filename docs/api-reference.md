@@ -167,7 +167,9 @@ Assets with packages affected by CISA Known Exploited Vulnerabilities.
           "poc_links": "[\"https://exploit-db.com/...\"]"
         },
         "affected_packages": [
-          {"id": 100, "name": "cryptography", "version": "41.0.0", "ecosystem": "PyPI"}
+          {"id": 100, "name": "cryptography", "version": "41.0.0", "ecosystem": "PyPI",
+           "fixed_version": "41.0.4",
+           "location": "/home/app/.local/lib/python3.12/site-packages/cryptography-41.0.0.dist-info"}
         ]
       }
     ]
@@ -323,8 +325,8 @@ browser `localStorage`.
 | `GET` | `/api/v1/assets/{hostname}/scans` | Per-ingest history (counts, diff new/removed) |
 | `GET` | `/api/v1/assets/{hostname}/sbom` | CycloneDX 1.5 JSON for the current snapshot |
 | `GET` | `/api/v1/assets/{hostname}/vulnerabilities?severity=&kev=&heuristic=` | Now includes `affected_packages` with per-package `fixed_version` |
-| `GET` | `/api/v1/packages/search?name=&version=&ecosystem=&exact=` | Which hosts have package X installed right now |
-| `GET` | `/api/v1/vulnerabilities?severity=&kev=&heuristic=&min_epss=&q=` | Vulns present on ≥1 asset, highest risk first |
+| `GET` | `/api/v1/packages/search?name=&version=&ecosystem=&exact=` | Which hosts have package X installed right now; `locations` gives `{hostname, location}` per host |
+| `GET` | `/api/v1/vulnerabilities?severity=&kev=&heuristic=&min_epss=&q=` | Vulns present on ≥1 asset, highest risk first; `occurrences` lists the first 5 `{hostname, name, version, ecosystem, fixed_version, location}` |
 | `GET` | `/api/v1/vulnerabilities/{vuln_id}` | Detail + every affected host/package |
 | `POST` | `/api/v1/maintenance/prune` | Delete packages no asset has and vulns no package references |
 
@@ -368,3 +370,12 @@ All error responses follow this format:
 | `404` | Resource not found |
 | `422` | Validation error (malformed request body or query parameters) |
 | `500` | Internal server error |
+
+### Package locations
+
+Every per-asset package view (`affected_packages[]` in threat/asset/vulnerability responses, `occurrences[]`,
+`/assets/{hostname}/packages`, `locations[]` in package search) carries `location`: where the package was
+found on that asset. Host scans report the absolute `*.dist-info` / global `node_modules/<pkg>` directory;
+`--path` / `--rootfs` scans report the manifest, lockfile, venv or archive, stored as an absolute path
+(joined with the scan root). Several places are newline-separated. OS packages (RPM/dpkg/apk) and container
+packages have no location. Scans from older agents leave it `null` until the target is scanned again.

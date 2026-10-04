@@ -48,13 +48,14 @@ def not_suppressed(asset_id_col: Any = None) -> Any:
 
 
 def findings_query(*filters: Any, include_suppressed: bool = False) -> Select[Any]:
-    """(Asset, Package, Vulnerability, fixed_version, recommendation) rows for current host↔vuln exposure."""
+    """(Asset, Package, Vulnerability, fixed_version, recommendation, location) rows for current host↔vuln exposure."""
     if not include_suppressed:
         filters = (*filters, not_suppressed())
     return (
         select(
             Asset, Package, Vulnerability,
             package_vulnerability.c.fixed_version, package_vulnerability.c.recommendation,
+            asset_package.c.location,
         )
         .join(asset_package, asset_package.c.asset_id == Asset.id)
         .join(Package, Package.id == asset_package.c.package_id)
@@ -87,10 +88,10 @@ def vuln_filters(
     return out
 
 
-def affected_out(pkg: Package, fixed: str | None, rec: str | None) -> AffectedPackageOut:
+def affected_out(pkg: Package, fixed: str | None, rec: str | None, location: str | None = None) -> AffectedPackageOut:
     return AffectedPackageOut(
         id=pkg.id, name=pkg.name, version=pkg.version, ecosystem=pkg.ecosystem,
-        fixed_version=fixed, recommendation=rec,
+        fixed_version=fixed, recommendation=rec, location=location,
     )
 
 
@@ -109,10 +110,10 @@ async def threat_assets(db: AsyncSession, filters: list[Any]) -> list[ThreatAsse
     rows = (await db.execute(findings_query(*filters))).all()
     assets: dict[int, Asset] = {}
     grouped: dict[int, dict[int, tuple[Vulnerability, list[AffectedPackageOut]]]] = {}
-    for asset, pkg, vuln, fixed, rec in rows:
+    for asset, pkg, vuln, fixed, rec, loc in rows:
         assets[asset.id] = asset
         slot = grouped.setdefault(asset.id, {}).setdefault(vuln.id, (vuln, []))
-        slot[1].append(affected_out(pkg, fixed, rec))
+        slot[1].append(affected_out(pkg, fixed, rec, loc))
 
     output: list[ThreatAssetOut] = []
     for asset_id, vmap in grouped.items():

@@ -110,6 +110,16 @@ on `findings_query()` (it already excludes triage-suppressed findings) or add `n
 * Fetch with `useApi(path)` and render through `<Loader q=…>`; never pass `null` data to renderers.
 * Never inject raw HTML; the CSP forbids inline scripts and eval.
 * New sidebar entry → add it to `MENU` **and** a `case` in `App()` (enforced by `tests/test_ui_assets.py`).
+* Colours are tokens in `app.css`: the indigo primary scale (`--primary-1…10`, Arco expects `r,g,b`
+  triplets) and the surfaces are defined for light (`body`) and dark (`body[arco-theme="dark"]`). Severity
+  colours stay semantic (`SEV_HEX`). Reuse the tokens instead of hard-coding colours.
+* Motion lives in `app.css` (`ob-rise`, `ob-reveal`, staggered `.ob-kpi-grid`). Keep it short (≤ 0.5 s) and
+  covered by the `prefers-reduced-motion` block.
+* Cards side by side go in `<Row className="ob-eq" gutter={14}>` so they share the row height. Do not
+  use a vertical gutter: Arco writes it as an inline negative margin.
+* Paths: render package locations with `<FoundIn loc=…>`. It shortens long paths with `shortPath()`
+  and keeps the full path in a tooltip; pass `wrap` where there is room for the full path.
+* Check layouts at 390 px and 1280 px wide; neither may scroll horizontally at page level (wide tables scroll inside their card).
 * Updating vendored libraries: `npm pack <pkg>@<version>`, copy the UMD builds listed in
   `server/static/vendor/LICENSES.md`, regenerate the en-US locale wrapper, update the table and checksums.
 
@@ -120,3 +130,5 @@ on `findings_query()` (it already excludes triage-suppressed findings) or add `n
 2. Update [CHANGELOG.md](../CHANGELOG.md) and the README/docs.
 3. Run `python3 -m pytest` and `python3 -m pyflakes agent server tests`, then a live smoke test:
    agent `--check-osv --diff`, push to a local backend, click through the console.
+4. Make sure no scan data is staged: `output/`, `logs/`, `agent/output/`, `agent/logs/` and `*.db*` are
+   git-ignored and contain host names, inventories and paths (`git status --ignored` to double-check).

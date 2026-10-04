@@ -59,6 +59,8 @@ asset_package = Table(
     Column("package_id", Integer, ForeignKey("packages.id", ondelete="CASCADE"), primary_key=True),
     Column("diff_label", String(20), nullable=True),
     Column("scan_ts", DateTime(timezone=True), nullable=False, default=utcnow),
+    # Where the package was found on this asset (manifest/lockfile/venv path for path/rootfs/image scans)
+    Column("location", Text, nullable=True),
     Index("ix_asset_package_package", "package_id"),
 )
 

@@ -115,7 +115,8 @@ All HTTP calls: http_request() with 3 attempts, exponential backoff, Retry-After
 ```
 assets ──< asset_package >── packages ──< package_vulnerability >── vulnerabilities
   │            (diff_label,     (purl, license,   (fixed_version,         (severity, cvss, epss,
-  │             scan_ts)         osv_* coords)     recommendation)          is_kev, is_heuristic,
+  │             scan_ts,         osv_* coords)     recommendation)          is_kev, is_heuristic,
+  │             location)                                                     
   │                                                                          is_malicious, cves,
   ├──< scans (history per ingest: counts, source)                            poc_links)
   │                                                                              │
@@ -128,7 +129,7 @@ assets ──< asset_package >── packages ──< package_vulnerability >─
 | `assets` | `hostname` (unique), `ip_address`, `os_name`, `agent_version`, `first_seen`, `last_seen`, `last_scan_ts`, `last_scan_summary`, `target_type` (host/image/rootfs/path/sbom), `target_ref`, `eol_json`, `license_violations_json` |
 | `packages` | unique (`name`, `version`, `ecosystem`), `purl`, `license`, `osv_ecosystem`, `osv_name`, `osv_version` |
 | `vulnerabilities` | `vuln_id` (unique; heuristics namespaced `ID::ecosystem::package`), `severity`, `summary`, `cvss_score`, `epss_score`, `epss_percentile`, `is_kev` (sticky), `kev_description`, `is_heuristic`, `is_malicious`, `poc_links`, `cves`, `first_seen`, `last_updated` |
-| `asset_package` | snapshot of what an asset has installed now |
+| `asset_package` | snapshot of what an asset has installed now; `location` = where that asset holds the package (dist-info / node_modules dir, or manifest/lockfile/venv for path/rootfs scans, absolute; several separated by newlines) |
 | `package_vulnerability` | per-package `fixed_version` / `recommendation` (one CVE can have different fixes per ecosystem) |
 | `scans` | one row per ingest: package/vuln/severity/KEV/IOC/malicious/license counts, diff counts, `source` (agent, sbom-upload, reanalysis) |
 | `triage` | analyst decisions; `not_affected` / `false_positive` suppress findings |
@@ -141,7 +142,8 @@ version installed. Schema evolution: `init_db()` runs `create_all` and adds miss
 ```
 AgentPayload (validated) ─► upsert asset (hostname; ip, OS, agent version, target, EOL, license violations)
                          ─► resolve packages in bulk (chunks of 400) and refresh purl/license/osv_*
-                         ─► REPLACE the asset's asset_package rows (snapshot → uninstalled packages disappear)
+                         ─► REPLACE the asset's asset_package rows (snapshot → uninstalled packages disappear),
+                            storing each package's location(s); path/rootfs locations are joined with the scan root
                          ─► resolve vulnerabilities in bulk; update non-null fields; KEV/heuristic/malicious sticky
                          ─► upsert package_vulnerability (only changed fixes are updated)
                          ─► insert scans row ─► commit

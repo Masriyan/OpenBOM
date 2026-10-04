@@ -21,6 +21,8 @@ from server.queries import (
 )
 from server.schemas import (
     AffectedAssetOut,
+    HostLocationOut,
+    OccurrenceOut,
     PackageHostsOut,
     PackageOut,
     PruneResponse,
@@ -43,7 +45,7 @@ async def search_packages(
     db: AsyncSession = Depends(get_db),
 ) -> list[PackageHostsOut]:
     """Which hosts have package X (optionally version Y) installed right now?"""
-    stmt = (select(Package, Asset.hostname)
+    stmt = (select(Package, Asset.hostname, asset_package.c.location)
             .join(asset_package, asset_package.c.package_id == Package.id)
             .join(Asset, Asset.id == asset_package.c.asset_id))
     stmt = stmt.where(func.lower(Package.name) == name.lower()) if exact else stmt.where(Package.name.ilike(f"%{name}%"))
@@ -54,8 +56,10 @@ async def search_packages(
     rows = (await db.execute(stmt.order_by(Package.name, Package.version))).all()
 
     grouped: dict[int, tuple[Package, list[str]]] = {}
-    for pkg, host in rows:
+    where: dict[int, list[HostLocationOut]] = {}
+    for pkg, host, loc in rows:
         grouped.setdefault(pkg.id, (pkg, []))[1].append(host)
+        where.setdefault(pkg.id, []).append(HostLocationOut(hostname=host, location=loc))
     pkg_ids = list(grouped)[:limit]
 
     vuln_info: dict[int, list[str]] = {}
@@ -74,6 +78,7 @@ async def search_packages(
         out.append(PackageHostsOut(
             package=PackageOut.model_validate(pkg),
             hosts=sorted(set(hosts)),
+            locations=sorted(where.get(pid, []), key=lambda h: h.hostname),
             vulnerability_count=len(sevs),
             max_severity=min(sevs, key=lambda s: SEVERITY_ORDER.get(s, 9)) if sevs else None,
         ))
@@ -115,11 +120,32 @@ async def list_vulnerabilities(
     rows.sort(key=lambda r: vuln_sort_key(r[0]))
     page = rows[offset: offset + limit]
     states = await triage_states(db, [v.id for v, *_ in page])
+    occurrences = await _occurrences(db, [v.id for v, *_ in page], include_suppressed)
     return [
         VulnerabilityListOut(**{**VulnerabilityOut.model_validate(v).model_dump(), "triage_state": states.get(v.id)},
-                             affected_assets=n_assets, affected_packages=n_pkgs)
+                             affected_assets=n_assets, affected_packages=n_pkgs,
+                             occurrences=occurrences.get(v.id, []))
         for v, n_assets, n_pkgs in page
     ]
+
+
+OCCURRENCES_PER_VULN = 5
+
+
+async def _occurrences(db: AsyncSession, vuln_ids: list[int], include_suppressed: bool) -> dict[int, list[OccurrenceOut]]:
+    """Host/package/path of the first few exposures per vulnerability (chunked for SQLite's parameter limit)."""
+    out: dict[int, list[OccurrenceOut]] = {}
+    for i in range(0, len(vuln_ids), 400):
+        rows = (await db.execute(
+            findings_query(Vulnerability.id.in_(vuln_ids[i: i + 400]), include_suppressed=include_suppressed)
+            .order_by(Asset.hostname, Package.name, Package.version)
+        )).all()
+        for asset, pkg, vuln, fixed, _rec, loc in rows:
+            bucket = out.setdefault(vuln.id, [])
+            if len(bucket) < OCCURRENCES_PER_VULN:
+                bucket.append(OccurrenceOut(hostname=asset.hostname, name=pkg.name, version=pkg.version,
+                                            ecosystem=pkg.ecosystem, fixed_version=fixed, location=loc))
+    return out
 
 
 @router.get("/vulnerabilities/{vuln_id:path}", response_model=VulnerabilityDetailOut)
@@ -132,8 +158,8 @@ async def get_vulnerability(vuln_id: str, db: AsyncSession = Depends(get_db)) ->
     state = (await triage_states(db, [vuln.id])).get(vuln.id)
     return VulnerabilityDetailOut(
         vulnerability=VulnerabilityOut.model_validate(vuln).model_copy(update={"triage_state": state}),
-        affected=[AffectedAssetOut(hostname=a.hostname, package=affected_out(p, fixed, rec))
-                  for a, p, _v, fixed, rec in rows],
+        affected=[AffectedAssetOut(hostname=a.hostname, package=affected_out(p, fixed, rec, loc))
+                  for a, p, _v, fixed, rec, loc in rows],
     )
 
 

@@ -121,6 +121,11 @@ In the console or via `PUT /api/v1/triage`.
 | `false_positive` | **suppresses** | `not_affected` |
 | `resolved` | informational | `fixed` |
 
+`resolved` records that a fix was applied; it does not hide anything. While the latest scan of an asset
+still contains the vulnerable version, the console tags the finding **resolved · still detected**. The
+usual causes are another copy of the package (check the *Found in* path) or a target that has not been
+rescanned. The finding disappears on the next scan of that target that no longer contains the version.
+
 Scope is either **fleet-wide** or **one asset**; an asset-specific decision overrides the fleet-wide
 one for that asset. Suppressed findings disappear from threat views, counts and risk scores; use the
 "show suppressed" switch or `include_suppressed=true` to see them with their `triage_state`.
@@ -138,4 +143,4 @@ customers or feed it back into CI with `--vex`.
 1. CI scans repositories with `--path . --sarif` and fails on new KEV/critical findings.
 2. Analysts triage in the console (fleet-wide `not_affected` with justification).
 3. The exported OpenVEX goes into the repository and is passed to CI with `--vex openvex.json`.
-4. Short-term risk acceptances go into `.openbomignore` **with an expiry date**.
+4. Short-term risk acceptances go into `.openbomignore` **with an expiry date**. Start from `.openbomignore.example`.
