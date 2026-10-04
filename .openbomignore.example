@@ -1,0 +1,12 @@
+# OpenBOM ignore file — reviewed findings to suppress (agent: --ignore FILE)
+# Copy to .openbomignore (or any path) and keep entries short-lived.
+#
+# Format: VULN-ID [package-or-purl] [until=YYYY-MM-DD] [# reason]
+#   VULN-ID  advisory id (GHSA-…, CVE-…, PYSEC-…) or a heuristic id (MALICIOUS_HEURISTIC, TYPOSQUAT_SUSPECT)
+#   package  optional package name or purl; without it the id is suppressed for every package
+#   until=   optional expiry; once past, the finding is reported (and fails CI) again
+#
+# Examples:
+# GHSA-x84v-xcm2-53pg requests until=2026-12-31  # not reachable: proxy auth unused, ticket SEC-123
+# MALICIOUS_HEURISTIC eventlet                   # reviewed: monkey-patches socket/ssl by design
+# TYPOSQUAT_SUSPECT reqeusts                     # internal fork, reviewed by AppSec
