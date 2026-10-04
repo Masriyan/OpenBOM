@@ -1,81 +1,62 @@
 # Contributing to OpenBOM
 
-Thank you for your interest in contributing to OpenBOM. This project aims to make the software supply chain more secure, and community contributions are essential to that mission.
+Thank you for your interest in contributing to OpenBOM. This project aims to make the software supply
+chain more secure, and community contributions are essential to that mission. Please follow the
+[Code of Conduct](CODE_OF_CONDUCT.md).
 
-## How to Contribute
+## How to contribute
 
-### Reporting Bugs
+### Reporting bugs
 
-1. Check [existing issues](https://github.com/Masriyan/OpenBOM/issues) to avoid duplicates
-2. Open a new issue with:
-   - A clear title describing the bug
-   - Steps to reproduce
-   - Expected vs. actual behavior
-   - Your OS, Python version, and relevant package versions
+1. Check [existing issues](https://github.com/Masriyan/OpenBOM/issues) to avoid duplicates.
+2. Open an issue using the **Bug report** template: steps to reproduce, expected vs. actual behaviour,
+   agent/backend version (`python3 agent/openbom_agent.py --version`, `GET /health`), OS and Python version,
+   and the relevant part of the debug log (`-v`). Remove hostnames or package lists you consider sensitive.
 
-### Suggesting Features
+Security vulnerabilities go to the private channel in [SECURITY.md](SECURITY.md), never to public issues.
 
-Open an issue with the `enhancement` label. Describe:
-- The problem you're trying to solve
-- Your proposed solution
-- Alternative approaches you've considered
+### Suggesting features
 
-### Submitting Code
+Use the **Feature request** template: the problem, your proposed solution, alternatives you considered.
+Check the [Roadmap](ROADMAP.md) and [market comparison](docs/comparison.md) first.
 
-1. Fork the repository at https://github.com/Masriyan/OpenBOM
-2. Create a feature branch from `main`:
+### Submitting code
+
+1. Fork https://github.com/Masriyan/OpenBOM and branch from `main` (`feature/<topic>` or `fix/<topic>`).
+2. Set up the environment and read the [Development Guide](docs/development.md).
+3. Make your change **with tests** — the suite must stay green and offline:
    ```bash
-   git checkout -b feature/your-feature
+   python3 -m pytest
+   python3 -m pyflakes agent server tests
    ```
-3. Make your changes
-4. Test locally:
-   ```bash
-   # Agent
-   python3 agent/openbom_agent.py --scan-only
-   python3 agent/openbom_agent.py --check-osv --diff
+4. For behaviour that depends on live data (a new ecosystem, distro or intel feed), also run the agent
+   against the real service once and mention the result in the PR.
+5. Update the documentation you touched (README, `docs/`, CHANGELOG under "Unreleased").
+6. Open a pull request using the template.
 
-   # Backend
-   uvicorn server.main:app --reload
-   curl -X POST http://localhost:8000/api/v1/ingest -H "Content-Type: application/json" -d @output/your_scan.json
-   ```
-5. Commit with a descriptive message
-6. Push and open a Pull Request
+## Code guidelines
 
-## Development Setup
+- Python 3.12+, type hints throughout, `from __future__ import annotations` at the top of modules.
+- Follow the surrounding style; `pyflakes` must be clean (no other linter is enforced).
+- **The agent stays a single file** (`agent/openbom_agent.py`) for ease of deployment, and importing it must
+  have no side effects (the backend imports it for server-side analysis).
+- Backend follows FastAPI conventions: routers, schemas, models in separate files; exposure queries must
+  respect triage suppression (`findings_query` / `not_suppressed`).
+- New database columns must be nullable (automatic forward migration).
+- Console: no build step, no inline scripts, never inject raw HTML; vendored libraries only (update
+  `server/static/vendor/LICENSES.md` when changing them).
+- Never write caches or state to world-writable locations; never log secrets (webhook URLs, API keys).
+- Parsers must tolerate malformed input — log and skip, never abort a scan.
 
-```bash
-git clone https://github.com/Masriyan/OpenBOM.git
-cd OpenBOM
+## Areas where help is needed
 
-# Install all dependencies
-pip install httpx rich jinja2 weasyprint
-pip install fastapi uvicorn sqlalchemy aiosqlite
+- Go/Rust binary build-info scanning and Red Hat/Fedora advisory sources (see the [Roadmap](ROADMAP.md))
+- More lockfile formats (Swift, Dart/pub, Elixir/mix, Conan)
+- Windows/macOS inventory
+- Backend notifications and role-based API keys
+- Packaging: RPM/DEB, container image, Helm chart
+- Documentation, translations and real-world false-positive reports for the heuristic engine
 
-# Run the backend in dev mode
-uvicorn server.main:app --reload
+## License
 
-# Run the agent
-python3 agent/openbom_agent.py --check-osv --diff --report
-```
-
-## Code Guidelines
-
-- Python 3.12+ with type hints throughout
-- Use `from __future__ import annotations` for forward references
-- Follow existing code style — no linter configuration is enforced, but consistency matters
-- Keep the agent as a single file (`openbom_agent.py`) for ease of deployment
-- Backend follows FastAPI conventions: routers, schemas, models in separate files
-
-## Areas Where Help Is Needed
-
-- **Ecosystem expansion**: Adding support for Go modules, Cargo (Rust), Maven (Java)
-- **Container scanning**: Extending Podman support to Docker, and adding image layer analysis
-- **NVD integration**: Direct NVD API queries as a fallback when OSV data is sparse
-- **Dashboard**: A web frontend for the backend API
-- **Authentication**: API key or OAuth2 middleware for the backend
-- **Testing**: Unit tests for the agent extraction functions and backend routes
-- **Packaging**: RPM/DEB packages, Docker images, Helm charts
-
-## Code of Conduct
-
-Be respectful, constructive, and professional. We're all here to make software safer.
+By contributing you agree that your contributions are licensed under the project's [MIT License](LICENSE).

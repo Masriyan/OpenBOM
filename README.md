@@ -20,6 +20,11 @@
 
 **Open-source supply chain threat detection platform for Linux infrastructure.**
 
+<p align="center"><img src="assets/dashboard-overview.jpg" alt="OpenBOM console (Arco Design) — fleet overview" width="100%"></p>
+
+> How OpenBOM compares to Syft, Grype, Trivy, OSV-Scanner, cdxgen, Dependency-Track and Socket:
+> **[docs/comparison.md](docs/comparison.md)**.
+
 OpenBOM continuously inventories every package on your endpoints — OS packages, Python libraries, NPM modules, and container images — then cross-references them against vulnerability databases, exploit intelligence feeds, and behavioral heuristics to surface the threats that actually matter: actively exploited CVEs, packages with public proof-of-concept exploits, and newly installed code exhibiting malware patterns.
 
 ---
@@ -105,17 +110,29 @@ By fusing these signals, OpenBOM transforms a wall of CVEs into a short list of 
 
 | Feature | Description |
 |---------|-------------|
-| **Multi-ecosystem SBOM** | Extracts packages from RPM, Debian/dpkg, PyPI (pip), NPM (global), and Podman containers |
-| **OSV.dev integration** | Async batch queries + individual vuln enrichment for full severity/remediation data |
+| **Multi-ecosystem SBOM** | Host RPM / dpkg / apk, global pip & npm, running Podman/Docker containers |
+| **Scan targets** | `--path` repos (requirements, Poetry/uv/Pipfile, npm/yarn/pnpm, go.mod, Cargo, Gemfile, Composer, NuGet, Maven/Gradle, venvs, node_modules, nested JAR/WAR), `--rootfs`, `--image` (podman/docker), `--sbom` (CycloneDX/SPDX from Syft, Trivy, cdxgen…) |
+| **Known-malicious packages** | OpenSSF malicious-package advisories (OSV `MAL-*`) flagged CRITICAL with "treat host as compromised" guidance |
+| **License compliance** | Licenses from rpm/apk/Debian copyright/PyPI/npm/lockfiles, optional deps.dev enrichment, `--license-deny` policy gate |
+| **End-of-life** | OS, Python and Node.js EOL via endoflife.date |
+| **VEX & ignore** | `--vex` (OpenVEX / CycloneDX VEX) and `--ignore` (with expiry dates) suppress triaged findings |
+| **SPDX / SARIF** | `--spdx` (SPDX 2.3) and `--sarif` (GitHub/GitLab code scanning) alongside CycloneDX |
+| **OSV.dev integration** | PyPI, npm, **Debian, Ubuntu, AlmaLinux, Rocky Linux** (OS + container packages, source-package/epoch aware). Async batch + enrichment with retry/backoff |
+| **Accurate scoring** | Real CVSS v3.1 base-score calculation, GHSA/Ubuntu/RHEL qualitative ratings, fix version chosen from the range that contains the installed version, GHSA↔PYSEC alias de-duplication |
 | **EPSS scoring** | Queries FIRST.org for exploit prediction probability on every CVE |
 | **CISA KEV cross-reference** | Downloads the KEV catalog (24h cache) and flags actively exploited CVEs |
 | **PoC/exploit detection** | Scans OSV references for exploit-db, PacketStorm, and GitHub PoC links |
-| **Heuristic IOC scanner** | Regex-based detection of `eval(base64)`, `os.system(url)`, `pastebin/ngrok`, and more — runs only on `[NEW]` packages |
-| **Delta/diff scanning** | Compares against previous scan state to label `[NEW]`, `[UPGRADED]`, `[DOWNGRADED]` packages |
+| **Heuristic IOC scanner** | Strong indicators (`exec(base64)`, reverse shells, miners, `curl \| sh` npm install hooks) → CRITICAL; co-occurring weak indicators (credential paths + Discord/Telegram exfil, `.pth` auto-exec…) → HIGH. Scope: `--heuristics new\|all\|off` |
+| **Typosquat detection** | Flags PyPI/npm packages one edit away from popular names (`reqeusts`, `lodahs`) with a curated allowlist of legitimate look-alikes |
+| **Delta/diff scanning** | Labels `[NEW]`, `[UPGRADED]`, `[DOWNGRADED]` with rpm/dpkg/PEP 440/semver ordering; lists removed packages |
+| **CycloneDX 1.5 export** | `--cyclonedx PATH` writes a standard SBOM with purls and vulnerabilities |
+| **Backend push** | `--server-url` / `--push-file` upload results directly (API-key aware) |
+| **Interactive menu** | Run with no flags on a terminal for a guided menu (scan, hunt, view, push, export, cache management) |
+| **CI gating** | `--fail-on critical\|high\|…` controls exit code 2 |
 | **Rich CLI output** | Progress bars, severity tables, KEV/IOC alert panels with blinking red indicators |
 | **HTML/PDF reporting** | Professional dark-theme reports via Jinja2 + Tailwind CSS + WeasyPrint |
-| **OSV response caching** | 12-hour file cache to avoid redundant API calls |
-| **Webhook alerting** | POST to Slack/Teams when CRITICAL or KEV findings are detected |
+| **Safe caching** | 12h OSV / 24h KEV caches in a private `0700` state dir (never `/tmp`), atomic writes, failed lookups never cached as "clean" |
+| **Webhook alerting** | POST to Slack/Teams/Discord when CRITICAL, KEV or IOC findings are detected |
 
 ### Backend Server (`server/`)
 
@@ -123,14 +140,24 @@ By fusing these signals, OpenBOM transforms a wall of CVEs into a short list of 
 |---------|-------------|
 | **Async FastAPI** | Fully async with SQLAlchemy 2.0 + asyncpg/aiosqlite |
 | **Flexible database** | PostgreSQL for production, SQLite for development — auto-detected |
-| **Idempotent ingestion** | Re-submitting the same scan upserts without duplication |
-| **Threat hunting API** | Query assets by KEV status, heuristic IOC, severity, or EPSS threshold |
-| **Fleet-wide visibility** | Aggregate statistics across all managed endpoints |
+| **Snapshot ingestion** | Idempotent bulk upsert; uninstalled/upgraded packages are unlinked so findings reflect what is installed *now* |
+| **Web console (Arco Design)** | `http://server:8000/` — Overview, Assets, Threat Hunt (Malicious/KEV/IOC/Critical/EPSS), Vulnerabilities, Package Search, Licenses, End-of-Life, Triage & VEX, SBOM Import, Reports & Export, Agent Setup, Settings. Dark/light theme, offline (vendored assets), strict CSP |
+| **Triage & VEX** | Fleet-wide or per-asset decisions (not_affected, false_positive, …) suppress findings; OpenVEX import/export |
+| **SBOM import & continuous monitoring** | Upload CycloneDX/SPDX from any tool; re-match stored inventories against fresh OSV/EPSS/KEV on demand or every `OPENBOM_REANALYZE_HOURS` |
+| **Threat hunting API** | KEV, heuristic IOC, severity, EPSS, fleet-wide package search ("who has xz 5.6.0?"), vuln → affected hosts |
+| **Risk scoring & history** | Per-asset 0-100 risk score, stale-asset detection, per-scan history |
+| **API-key auth** | `OPENBOM_API_KEY` protects all `/api/v1` routes |
+| **CycloneDX export** | `/api/v1/assets/{host}/sbom` |
 | **OpenAPI docs** | Auto-generated Swagger UI at `/docs` |
 
 ## Supported Operating Systems
 
 OpenBOM auto-detects the package manager at runtime and adapts its extraction strategy accordingly. No configuration needed — just run the agent.
+
+> **Vulnerability coverage of OS packages** depends on OSV.dev advisory feeds: **Debian, Ubuntu, AlmaLinux,
+> Rocky Linux and Alpine** packages (host and Podman containers) are checked. Fedora, RHEL, CentOS Stream,
+> openSUSE and Amazon Linux packages are inventoried and diffed, but OSV publishes no advisories for them.
+> PyPI and npm packages are checked on every distribution.
 
 ### Tier 1 — Fully Tested
 
@@ -160,7 +187,7 @@ These distributions use the same package managers and should work without modifi
 | **Pop!_OS** 22.04 | `dpkg-query` / `apt` | Ubuntu-based |
 | **Kali Linux** | `dpkg-query` / `apt` | Debian-based |
 | **Arch Linux** | Not supported (pacman) | Contribution welcome |
-| **Alpine Linux** | Not supported (apk) | Contribution welcome |
+| **Alpine Linux** 3.x | `apk` (`/lib/apk/db/installed`) | OS packages OSV-checked (`Alpine:vX.Y`); also in images/containers |
 
 ### Ecosystem Coverage
 
@@ -171,7 +198,9 @@ Package extraction is independent of the host OS — these work on any supported
 | **Python (PyPI)** | `pip3 freeze --all` | Python 3.12+ with pip |
 | **Node.js (NPM)** | `npm list -g --depth=0 --json` | npm installed globally |
 | **Containers (Podman)** | `podman exec <id> rpm -qa` or `dpkg-query` | Podman with running containers |
-| **Containers (Docker)** | Not yet supported | Contribution welcome — Docker CLI is similar to Podman |
+| **Containers (Docker)** | `docker exec <id> rpm -qa` / `dpkg-query` / apk db | Docker with running containers |
+| **Container images** | `--image REF` → `podman/docker create` + `export` → rootfs scan | podman or docker |
+| **Project lockfiles** | `--path DIR` — Python, npm/yarn/pnpm, Go, Cargo, RubyGems, Composer, NuGet, Maven/Gradle, JAR/WAR | none (pure parsing) |
 
 ### Backend Server
 
@@ -197,17 +226,22 @@ The backend server runs on any OS with Python 3.12+, but is tested on:
 git clone https://github.com/Masriyan/OpenBOM.git
 cd OpenBOM
 
-# Install agent dependencies
-pip install httpx rich jinja2
+# Agent + backend + test dependencies
+pip install -r requirements.txt
 
-# Optional: PDF reports and backend
-pip install weasyprint
-pip install fastapi uvicorn sqlalchemy aiosqlite
+# Optional: PDF reports / PostgreSQL
+pip install weasyprint asyncpg
+
+# Run the test suite
+python3 -m pytest
 ```
 
 ### Run the Agent
 
 ```bash
+# Interactive menu (on a terminal, no flags)
+python3 agent/openbom_agent.py
+
 # Scan only — generate SBOM (no network calls)
 python3 agent/openbom_agent.py --scan-only
 
@@ -217,6 +251,9 @@ python3 agent/openbom_agent.py --check-osv --report --diff
 # With webhook alerts
 python3 agent/openbom_agent.py --check-osv --report --diff \
   --webhook-url https://hooks.slack.com/services/YOUR/WEBHOOK/URL
+
+# Hunt and push straight to the backend
+OPENBOM_API_KEY=... python3 agent/openbom_agent.py --check-osv --diff --server-url http://openbom:8000
 ```
 
 ### Run the Backend
@@ -225,36 +262,60 @@ python3 agent/openbom_agent.py --check-osv --report --diff \
 # Development (SQLite)
 uvicorn server.main:app --reload --host 0.0.0.0 --port 8000
 
-# Production (PostgreSQL)
+# Production (PostgreSQL + API key)
 export DATABASE_URL=postgresql+asyncpg://user:pass@localhost:5432/openbom
+export OPENBOM_API_KEY=$(openssl rand -hex 24)
 uvicorn server.main:app --host 0.0.0.0 --port 8000 --workers 4
 ```
+
+Open `http://localhost:8000/` for the dashboard (enter the API key under **Settings**) and `/docs` for the API.
 
 ### Ingest Agent Data
 
 ```bash
 # Run agent and pipe output to backend
-python3 agent/openbom_agent.py --check-osv --diff -o /tmp/scan.json
-curl -X POST http://your-backend:8000/api/v1/ingest \
-  -H "Content-Type: application/json" \
-  -d @/tmp/scan.json
+python3 agent/openbom_agent.py --check-osv --diff -o scan.json
+python3 agent/openbom_agent.py --push-file scan.json --server-url http://your-backend:8000 --api-key "$OPENBOM_API_KEY"
+# or: curl -X POST http://your-backend:8000/api/v1/ingest -H "Content-Type: application/json" \
+#          -H "X-API-Key: $OPENBOM_API_KEY" -d @scan.json
 ```
 
 ## CLI Reference
 
 ```
-usage: openbom_agent [-h] (--scan-only | --check-osv) [-o OUTPUT] [--report]
-                     [--no-cache] [--diff] [--webhook-url WEBHOOK_URL] [-v]
+usage: openbom_agent [--scan-only | --check-osv | --push-file JSON | --menu] [options]
 
-Options:
+Modes (none on a terminal = interactive menu; a scan target alone implies --check-osv):
   --scan-only            Collect SBOM only (no network calls)
-  --check-osv            Full scan: OSV + EPSS + KEV + PoC detection
-  -o, --output PATH      JSON report output path
-  --report               Generate HTML and PDF enterprise reports
-  --diff                 Compare against previous scan state
-  --no-cache             Bypass 12-hour OSV response cache
-  --webhook-url URL      POST alerts to Slack/Teams webhook
-  -v, --verbose          Debug-level console logging
+  --check-osv            Full scan: OSV + MAL + EPSS + KEV + EOL
+  --push-file JSON       Upload an existing scan JSON to --server-url
+  --menu                 Interactive menu
+
+Scan targets (default: this host):
+  --path DIR             Repository / build tree (repeatable)
+  --rootfs DIR           Unpacked root filesystem
+  --image REF            Container image via podman or docker
+  --sbom FILE            Existing CycloneDX / SPDX JSON SBOM
+  --ecosystems LIST      Host sources: os,pypi,npm,podman,docker
+
+Outputs:
+  -o, --output PATH      JSON report path         --output-dir DIR   (default ./output)
+  --report               HTML + PDF report        --cyclonedx PATH   CycloneDX 1.5
+  --spdx PATH            SPDX 2.3                 --sarif PATH       SARIF 2.1.0
+
+Analysis & policy:
+  --diff                 Delta vs. previous scan of the same target
+  --heuristics MODE      new (default; needs --diff) | all | off
+  --vex FILE             OpenVEX / CycloneDX VEX suppressions (repeatable)
+  --ignore FILE          'VULN-ID [package|purl] [until=YYYY-MM-DD] # reason'
+  --license-deny LIST    e.g. GPL-3.0,AGPL,SSPL (fails the run)
+  --deps-dev             Fill missing licenses from deps.dev
+  --no-eol               Skip end-of-life checks
+  --fail-on LEVEL        any | critical | high | medium | low | never
+  --no-cache             Bypass the 12-hour OSV cache
+
+Other:
+  --hostname NAME  --webhook-url URL  --server-url URL  --api-key KEY  -v  --version
 ```
 
 ### Exit Codes
@@ -263,7 +324,7 @@ Options:
 |------|---------|
 | `0` | Scan complete, no vulnerabilities found |
 | `1` | No packages found (empty system) |
-| `2` | Vulnerabilities detected |
+| `2` | Findings at/above `--fail-on`, any KEV / malicious package, or a license-policy violation |
 | `130` | Interrupted by user (Ctrl+C) |
 
 ## API Reference
@@ -282,31 +343,56 @@ See [docs/api-reference.md](docs/api-reference.md) for complete endpoint documen
 | `GET` | `/api/v1/assets` | List all managed assets |
 | `GET` | `/api/v1/assets/{hostname}` | Single asset detail |
 | `GET` | `/api/v1/assets/{hostname}/packages` | Packages installed on an asset |
-| `GET` | `/api/v1/assets/{hostname}/vulnerabilities` | Vulnerabilities affecting an asset |
+| `GET` | `/api/v1/assets/{hostname}/vulnerabilities` | Vulnerabilities affecting an asset (with per-package fix) |
+| `GET` | `/api/v1/assets/{hostname}/scans` | Scan history |
+| `GET` | `/api/v1/assets/{hostname}/sbom` | CycloneDX 1.5 export |
+| `DELETE` | `/api/v1/assets/{hostname}` | Decommission an asset |
+| `GET` | `/api/v1/packages/search` | Which hosts have package X (version Y) |
+| `GET` | `/api/v1/vulnerabilities` | Fleet vulnerability list with filters |
+| `GET` | `/api/v1/vulnerabilities/{vuln_id}` | Vulnerability detail + affected hosts |
+| `POST` | `/api/v1/maintenance/prune` | Remove orphaned packages/vulns |
+| `GET` | `/api/v1/threats/malicious` | Assets with known-malicious packages |
+| `GET/PUT/DELETE` | `/api/v1/triage` | Analyst decisions (fleet-wide or per asset) |
+| `GET/POST` | `/api/v1/vex` | Export / import OpenVEX |
+| `GET` | `/api/v1/licenses`, `/api/v1/licenses/packages` | License inventory |
+| `GET` | `/api/v1/eol` | Assets running end-of-life software |
+| `POST` | `/api/v1/sbom` | Import a CycloneDX/SPDX SBOM (optionally analysed server-side) |
+| `POST` | `/api/v1/reanalyze`, `/api/v1/assets/{hostname}/reanalyze` | Continuous monitoring: re-match stored inventories |
 
 ## Project Structure
 
 ```
 OpenBOM/
 ├── agent/
-│   ├── openbom_agent.py              # Endpoint agent (1,378 lines)
+│   ├── openbom_agent.py              # Endpoint agent (single file by design)
 │   └── templates/
 │       └── report_template.html      # Jinja2 + Tailwind HTML report template
 ├── server/
-│   ├── main.py                       # FastAPI application entry point
-│   ├── database.py                   # Async SQLAlchemy engine + session
-│   ├── models.py                     # ORM models (Asset, Package, Vulnerability)
+│   ├── main.py                       # FastAPI app, dashboard route, security headers
+│   ├── config.py / security.py       # Env settings, API-key auth
+│   ├── database.py                   # Async engine, SQLite pragmas, init + column migration
+│   ├── models.py                     # ORM models (Asset, Package, Vulnerability, ScanRecord, Triage)
 │   ├── schemas.py                    # Pydantic request/response schemas
+│   ├── queries.py / sbom.py          # Shared joins, triage suppression, risk score, CycloneDX export
+│   ├── analyzer.py                   # Reuses the agent engine for SBOM uploads + re-analysis
+│   ├── static/                       # Arco Design console: index.html, app.js, app.css, logos, vendor/
 │   └── routers/
 │       ├── ingest.py                 # POST /api/v1/ingest
 │       ├── threats.py                # GET /api/v1/threats/*
-│       └── assets.py                 # GET /api/v1/assets/*
+│       ├── assets.py                 # /api/v1/assets/*
+│       ├── hunt.py                   # packages/search, vulnerabilities, maintenance
+│       └── governance.py             # triage, VEX, licenses, EOL, SBOM import, re-analysis
+├── tests/                            # pytest suite (agent, API, governance, console checks)
+├── .github/                          # issue + pull request templates
 ├── docs/
 │   ├── architecture.md               # System architecture deep-dive
 │   ├── agent-guide.md                # Endpoint agent deployment guide
 │   ├── api-reference.md              # Backend API documentation
 │   ├── threat-model.md               # Threat intelligence methodology
-│   └── deployment.md                 # Production deployment guide
+│   ├── deployment.md                 # Production deployment guide
+│   └── …                             # configuration, dashboard, CI, SBOM/VEX, detection rules,
+│                                     # development, troubleshooting, comparison (see docs/README.md)
+├── CHANGELOG.md · ROADMAP.md · SECURITY.md · CONTRIBUTING.md · CODE_OF_CONDUCT.md
 ├── output/                           # Generated reports (JSON, HTML, PDF)
 ├── logs/                             # Agent log files
 └── README.md
@@ -314,13 +400,24 @@ OpenBOM/
 
 ## Documentation
 
+Full index: **[docs/README.md](docs/README.md)**
+
 | Document | Description |
 |----------|-------------|
-| [Architecture](docs/architecture.md) | System design, data flow, and database schema |
-| [Agent Guide](docs/agent-guide.md) | Deploying and configuring the endpoint agent |
-| [API Reference](docs/api-reference.md) | Complete REST API documentation |
-| [Threat Model](docs/threat-model.md) | How OpenBOM layers intelligence sources for threat prioritization |
-| [Deployment Guide](docs/deployment.md) | Production deployment with PostgreSQL, systemd, and fleet management |
+| [Agent Guide](docs/agent-guide.md) | Scan modes, targets (host, repo, image, rootfs, SBOM), outputs, menu, scheduling |
+| [Dashboard Guide](docs/dashboard-guide.md) | Every console menu, triage workflow, SBOM import, exports |
+| [Configuration Reference](docs/configuration.md) | All CLI flags, environment variables, files and limits |
+| [CI/CD Integration](docs/ci-integration.md) | GitHub Actions, GitLab CI, Jenkins, SARIF upload, build gating |
+| [SBOM, VEX & Triage](docs/sbom-and-vex.md) | CycloneDX/SPDX/OpenVEX exchange, purls, suppression semantics |
+| [Detection Rules](docs/detection-rules.md) | Heuristic IOC, typosquat and malicious-package logic, tuning |
+| [Architecture](docs/architecture.md) | Agent pipeline, data model, ingestion, console |
+| [API Reference](docs/api-reference.md) | REST API |
+| [Threat Model](docs/threat-model.md) | How intelligence layers become priorities |
+| [Deployment Guide](docs/deployment.md) | PostgreSQL, systemd, TLS, fleet rollout, alerting |
+| [Troubleshooting](docs/troubleshooting.md) | Common problems and fixes |
+| [Development Guide](docs/development.md) | Dev setup, tests, extending parsers/rules/console |
+| [Market Comparison](docs/comparison.md) | OpenBOM vs. Syft, Grype, Trivy, OSV-Scanner, Dependency-Track, Socket |
+| [Changelog](CHANGELOG.md) · [Roadmap](ROADMAP.md) · [Security](SECURITY.md) · [Contributing](CONTRIBUTING.md) · [Code of Conduct](CODE_OF_CONDUCT.md) | Project policies |
 
 ## Intelligence Sources
 
