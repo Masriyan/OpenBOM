@@ -27,13 +27,13 @@
 > How OpenBOM compares to Syft, Grype, Trivy, OSV-Scanner, cdxgen, Dependency-Track and Socket:
 > **[docs/comparison.md](docs/comparison.md)**.
 
-OpenBOM continuously inventories every package on your endpoints — OS packages, Python libraries, NPM modules, and container images — then cross-references them against vulnerability databases, exploit intelligence feeds, and behavioral heuristics to surface the threats that actually matter: actively exploited CVEs, packages with public proof-of-concept exploits, and newly installed code exhibiting malware patterns.
+OpenBOM continuously inventories every package on your endpoints, OS packages, Python libraries, NPM modules, and container images, then cross-references them against vulnerability databases, exploit intelligence feeds, and behavioral heuristics to surface the threats that actually matter: actively exploited CVEs, packages with public proof-of-concept exploits, and newly installed code exhibiting malware patterns.
 
 ---
 
 ## The Problem
 
-Modern infrastructure runs on thousands of open-source dependencies. A single compromised package in PyPI or NPM can give an attacker code execution across your entire fleet. Traditional vulnerability scanners tell you what *could* be exploited. OpenBOM tells you what *is being* exploited — right now, on your systems.
+Modern infrastructure runs on thousands of open-source dependencies. A single compromised package in PyPI or NPM can give an attacker code execution across your entire fleet. Traditional vulnerability scanners tell you what *could* be exploited. OpenBOM tells you what *is being* exploited right now, on your systems.
 
 The software supply chain is under siege:
 
