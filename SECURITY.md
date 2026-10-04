@@ -4,7 +4,7 @@
 
 **Do not open a public GitHub issue for security vulnerabilities.**
 
-Report privately by e-mail to **security@openbom.dev**, or through a GitHub security advisory:
+Report privately by e-mail to **riyan.pratama@security-life.org**, or through a GitHub security advisory:
 <https://github.com/Masriyan/OpenBOM/security/advisories/new>
 
 Please include a description, reproduction steps, affected component and version, impact, and a
