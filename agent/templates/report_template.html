@@ -62,7 +62,7 @@
                 System Overview
             </h2>
             <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
-                <div class="bg-gray-800 rounded-lg p-4"><p class="text-xs text-gray-400 uppercase tracking-wider">Hostname</p><p class="text-lg font-mono text-white mt-1">{{ hostname }}</p></div>
+                <div class="bg-gray-800 rounded-lg p-4"><p class="text-xs text-gray-400 uppercase tracking-wider">Hostname</p><p class="text-lg font-mono text-white mt-1">{{ hostname }}</p>{% if os_name %}<p class="text-xs text-gray-400 mt-1">{{ os_name }}</p>{% endif %}</div>
                 <div class="bg-gray-800 rounded-lg p-4"><p class="text-xs text-gray-400 uppercase tracking-wider">Scan Time (UTC)</p><p class="text-lg font-mono text-white mt-1">{{ scan_ts[:19] }}</p></div>
                 <div class="bg-gray-800 rounded-lg p-4"><p class="text-xs text-gray-400 uppercase tracking-wider">OS Packages</p><p class="text-lg font-mono text-cyan-300 mt-1">{{ os_packages }}</p></div>
                 <div class="bg-gray-800 rounded-lg p-4"><p class="text-xs text-gray-400 uppercase tracking-wider">PyPI Packages</p><p class="text-lg font-mono text-green-300 mt-1">{{ pypi_packages }}</p></div>
@@ -127,7 +127,7 @@
             {% set ns_ioc = namespace(hits=[]) %}
             {% for finding in vulnerabilities %}
                 {% for vuln in finding.vulns %}
-                    {% if vuln.vuln_id == 'MALICIOUS_HEURISTIC' %}
+                    {% if vuln.is_heuristic %}
                         {% set _ = ns_ioc.hits.append({"pkg": finding.package.name, "ver": finding.package.version, "summary": vuln.summary}) %}
                     {% endif %}
                 {% endfor %}
@@ -221,7 +221,7 @@
                         {% for finding in vulnerabilities %}
                             {% for vuln in finding.vulns %}
                                 {% set ns.counter = ns.counter + 1 %}
-                                <tr class="border-b border-gray-700 {% if vuln.vuln_id == 'MALICIOUS_HEURISTIC' %}ioc-row{% elif vuln.is_kev %}kev-row{% endif %}">
+                                <tr class="border-b border-gray-700 {% if vuln.is_heuristic %}ioc-row{% elif vuln.is_kev %}kev-row{% endif %}">
                                     <td class="px-3 py-3 text-gray-500 font-mono">{{ ns.counter }}</td>
                                     <td class="px-3 py-3 font-medium text-white">
                                         {% if finding.package.diff_label %}
@@ -241,12 +241,12 @@
                                     <td class="px-3 py-3">
                                         {% if vuln.is_kev %}<span class="badge badge-kev mr-1">KEV</span>{% endif %}
                                         {% if vuln.poc_links %}<span class="badge badge-poc mr-1">PoC({{ vuln.poc_links|length }})</span>{% endif %}
-                                        {% if vuln.vuln_id == 'MALICIOUS_HEURISTIC' %}<span class="badge badge-ioc">IOC</span>{% endif %}
-                                        {% if not vuln.is_kev and not vuln.poc_links and vuln.vuln_id != 'MALICIOUS_HEURISTIC' %}<span class="text-gray-600">—</span>{% endif %}
+                                        {% if vuln.is_heuristic %}<span class="badge badge-ioc">IOC</span>{% endif %}
+                                        {% if not vuln.is_kev and not vuln.poc_links and not vuln.is_heuristic %}<span class="text-gray-600">—</span>{% endif %}
                                     </td>
                                     <td class="px-3 py-3 text-gray-400 max-w-xs truncate" title="{{ vuln.summary }}">{{ vuln.summary[:80] }}</td>
                                     <td class="px-3 py-3">
-                                        {% if vuln.vuln_id == 'MALICIOUS_HEURISTIC' %}<span class="text-red-400 font-bold">QUARANTINE IMMEDIATELY</span>
+                                        {% if vuln.is_heuristic %}<span class="text-red-400 font-bold">{{ vuln.recommendation }}</span>
                                         {% elif vuln.fixed_version %}<span class="text-green-400 font-medium">Upgrade to {{ vuln.fixed_version }}</span>
                                         {% else %}<span class="text-yellow-400">Review for alternatives</span>{% endif %}
                                     </td>
@@ -271,7 +271,7 @@
     </main>
 
     <footer class="max-w-7xl mx-auto mt-12 pt-6 border-t border-gray-700 text-center text-xs text-gray-500">
-        <p>OpenBOM Endpoint Agent v4.0 — Ultimate Threat Hunting Edition</p>
+        <p>OpenBOM Endpoint Agent v{{ agent_version }}</p>
         <p class="mt-1">Data sourced from <a href="https://osv.dev" class="text-cyan-500 hover:underline">OSV.dev</a>, <a href="https://www.first.org/epss/" class="text-cyan-500 hover:underline">FIRST.org EPSS</a> &amp; <a href="https://www.cisa.gov/known-exploited-vulnerabilities-catalog" class="text-cyan-500 hover:underline">CISA KEV</a> — Report generated {{ generated_at }}</p>
     </footer>
 </body>

@@ -1,0 +1,72 @@
+/* OpenBOM console — layout + brand layer on top of Arco Design */
+:root { --ob-brand: #ff4757; --ob-sider: #0f1117; --ob-sider-hover: #1a1d27; }
+html, body, #root { height: 100%; margin: 0; }
+body { background: var(--color-bg-1); color: var(--color-text-1); font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+
+.ob-layout { min-height: 100vh; }
+.ob-sider.arco-layout-sider { background: var(--ob-sider); box-shadow: 1px 0 0 rgba(255,255,255,.04); position: sticky; top: 0; height: 100vh; overflow: auto; }
+.ob-sider .arco-menu-dark, .ob-sider .arco-menu-dark .arco-menu-inline-header, .ob-sider .arco-menu-dark .arco-menu-item { background: var(--ob-sider); }
+.ob-sider .arco-menu-dark .arco-menu-item:hover, .ob-sider .arco-menu-dark .arco-menu-inline-header:hover { background: var(--ob-sider-hover); }
+.ob-sider .arco-menu-dark .arco-menu-item.arco-menu-selected { background: linear-gradient(90deg, rgba(255,71,87,.18), rgba(255,71,87,0)); color: #fff; box-shadow: inset 3px 0 0 var(--ob-brand); }
+.ob-sider .arco-menu-group, .ob-sider .arco-menu-group-title { background: transparent !important; }
+.ob-sider .arco-menu-group-title { color: #5f6678; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; padding-top: 14px; }
+.ob-logo { display: flex; align-items: center; gap: 10px; padding: 18px 16px 14px; color: #f1f2f6; cursor: pointer; }
+.ob-logo img { display: block; }
+.ob-logo .ob-mark { height: 34px; width: 34px; flex: none; }
+.ob-wordmark { line-height: 1.05; min-width: 0; }
+.ob-wordmark .ob-name { font-size: 20px; letter-spacing: -.01em; }
+.ob-wordmark .ob-name span { font-weight: 500; color: #f1f2f6; }
+.ob-wordmark .ob-name b { font-weight: 900; color: var(--ob-brand); }
+.ob-wordmark .ob-tag { font-size: 8.5px; font-weight: 600; letter-spacing: .16em; text-transform: uppercase; color: #6b7386; margin-top: 3px; white-space: nowrap; }
+.arco-layout-sider-collapsed .ob-logo { justify-content: center; padding-left: 0; padding-right: 0; }
+.ob-sider.arco-layout-sider { scrollbar-width: thin; scrollbar-color: #2a2e3a transparent; }
+.ob-sider .arco-layout-sider-children::-webkit-scrollbar, .ob-sider::-webkit-scrollbar { width: 6px; }
+.ob-sider .arco-layout-sider-children::-webkit-scrollbar-thumb, .ob-sider::-webkit-scrollbar-thumb { background: #2a2e3a; border-radius: 3px; }
+.ob-sider .arco-layout-sider-children { scrollbar-width: thin; scrollbar-color: #2a2e3a transparent; }
+.ob-sider-foot { color: #5f6678; font-size: 11px; padding: 12px 18px 18px; }
+
+.ob-header { display: flex; align-items: center; gap: 12px; height: 56px; padding: 0 20px; background: var(--color-bg-2); border-bottom: 1px solid var(--color-border-2); position: sticky; top: 0; z-index: 10; }
+.ob-header .ob-grow { flex: 1; min-width: 0; }
+.ob-content { padding: 20px 24px 48px; min-width: 0; }
+.ob-page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 18px; flex-wrap: wrap; }
+.ob-page-head h1 { font-size: 22px; font-weight: 650; margin: 0 0 4px; letter-spacing: -.01em; }
+.ob-page-head .ob-sub { color: var(--color-text-3); font-size: 13px; }
+
+.ob-kpi-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(176px, 1fr)); gap: 14px; }
+.ob-kpi-grid.c5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.ob-kpi-grid.c4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+@media (max-width: 1200px) { .ob-kpi-grid.c5 { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 720px) { .ob-kpi-grid.c5, .ob-kpi-grid.c4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.ob-kpi .arco-card-body { padding: 14px 16px; }
+.ob-kpi .arco-statistic-title { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--color-text-3); }
+.ob-kpi .arco-statistic-value { font-weight: 700; }
+.ob-kpi { border-top: 3px solid transparent; transition: transform .15s ease, box-shadow .15s ease; cursor: default; }
+.ob-kpi.clickable { cursor: pointer; }
+.ob-kpi.clickable:hover { transform: translateY(-2px); box-shadow: 0 6px 18px rgba(0,0,0,.18); }
+.ob-kpi.t-red { border-top-color: rgb(var(--red-6)); } .ob-kpi.t-orange { border-top-color: rgb(var(--orange-6)); }
+.ob-kpi.t-purple { border-top-color: rgb(var(--purple-6)); } .ob-kpi.t-blue { border-top-color: rgb(var(--arcoblue-6)); }
+.ob-kpi.t-gray { border-top-color: var(--color-border-3); } .ob-kpi.t-magenta { border-top-color: rgb(var(--magenta-6)); }
+.ob-kpi.t-gold { border-top-color: rgb(var(--gold-6)); } .ob-kpi.t-green { border-top-color: rgb(var(--green-6)); }
+
+.ob-stack { display: flex; height: 14px; border-radius: 999px; overflow: hidden; background: var(--color-fill-2); }
+.ob-stack > div { height: 100%; transition: width .3s ease; }
+.ob-legend { display: flex; gap: 14px; flex-wrap: wrap; color: var(--color-text-3); font-size: 12px; margin-top: 10px; }
+.ob-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+.ob-risk { display: flex; align-items: center; gap: 8px; min-width: 120px; }
+.ob-risk b { min-width: 24px; font-variant-numeric: tabular-nums; }
+.ob-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; }
+.ob-muted { color: var(--color-text-3); }
+.ob-trunc { max-width: 460px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: bottom; }
+.ob-click-row .arco-table-tr { cursor: pointer; }
+.ob-spark { display: flex; align-items: flex-end; gap: 3px; height: 56px; }
+.ob-spark > div { flex: 1; min-width: 5px; border-radius: 3px 3px 0 0; background: rgb(var(--arcoblue-5)); opacity: .9; }
+.ob-code { background: var(--color-fill-2); border-radius: 8px; padding: 10px 12px; margin: 0; overflow-x: auto; }
+.ob-hero-alert { margin-bottom: 16px; }
+.ob-section-gap > * + * { margin-top: 16px; }
+.ob-upload .arco-upload-trigger-drag { padding: 32px 16px; }
+
+@media (max-width: 860px) {
+  .ob-content { padding: 14px; }
+  .ob-header { padding: 0 12px; }
+  .ob-hide-sm { display: none !important; }
+}

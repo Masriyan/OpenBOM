@@ -2,99 +2,62 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+from typing import Any
+
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func, select
+from sqlalchemy import distinct, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
+from server.config import get_settings
 from server.database import get_db
-from server.models import Asset, Package, Vulnerability, asset_package, package_vulnerability
-from server.schemas import (
-    AssetOut,
-    PackageOut,
-    ThreatAssetOut,
-    ThreatFindingOut,
-    VulnerabilityOut,
+from server.models import (
+    SUPPRESSED_STATES,
+    Asset,
+    Package,
+    ScanRecord,
+    Triage,
+    Vulnerability,
+    as_utc,
+    asset_package,
+    package_vulnerability,
 )
+from server.queries import asset_stats, not_suppressed, threat_assets, vuln_filters
+from server.schemas import ThreatAssetOut
+from server.security import require_api_key
 
-router = APIRouter(prefix="/api/v1/threats", tags=["threats"])
+def _count_by(values: Any) -> dict[str, int]:
+    out: dict[str, int] = {}
+    for v in values:
+        out[v] = out.get(v, 0) + 1
+    return out
 
 
-async def _assets_by_vuln_filter(
-    db: AsyncSession,
-    is_kev: bool | None = None,
-    is_heuristic: bool | None = None,
-    min_epss: float | None = None,
-    severity: str | None = None,
-) -> list[ThreatAssetOut]:
-    """Shared query: find assets linked to vulns matching the given filters."""
-
-    vuln_q = select(Vulnerability)
-    if is_kev is not None:
-        vuln_q = vuln_q.where(Vulnerability.is_kev == is_kev)
-    if is_heuristic is not None:
-        vuln_q = vuln_q.where(Vulnerability.is_heuristic == is_heuristic)
-    if min_epss is not None:
-        vuln_q = vuln_q.where(Vulnerability.epss_score >= min_epss)
-    if severity is not None:
-        vuln_q = vuln_q.where(func.upper(Vulnerability.severity) == severity.upper())
-
-    vuln_result = await db.execute(vuln_q)
-    vulns = vuln_result.scalars().all()
-    if not vulns:
-        return []
-
-    # For each vuln, walk package -> asset relations
-    # Build: asset_id -> { vuln_id -> [package_ids] }
-    asset_map: dict[int, dict[int, list[Package]]] = {}
-    vuln_lookup: dict[int, Vulnerability] = {v.id: v for v in vulns}
-
-    for vuln in vulns:
-        for pkg in vuln.packages:
-            for asset in pkg.assets:
-                asset_map.setdefault(asset.id, {}).setdefault(vuln.id, []).append(pkg)
-
-    # Fetch full asset objects
-    if not asset_map:
-        return []
-    asset_result = await db.execute(select(Asset).where(Asset.id.in_(asset_map.keys())))
-    assets = {a.id: a for a in asset_result.scalars().all()}
-
-    output: list[ThreatAssetOut] = []
-    for asset_id, vuln_pkg_map in asset_map.items():
-        asset = assets.get(asset_id)
-        if not asset:
-            continue
-        findings: list[ThreatFindingOut] = []
-        for vuln_id, pkgs in vuln_pkg_map.items():
-            vuln = vuln_lookup[vuln_id]
-            findings.append(ThreatFindingOut(
-                vulnerability=VulnerabilityOut.model_validate(vuln),
-                affected_packages=[PackageOut.model_validate(p) for p in pkgs],
-            ))
-        findings.sort(key=lambda f: f.vulnerability.vuln_id)
-        output.append(ThreatAssetOut(asset=AssetOut.model_validate(asset), findings=findings))
-
-    output.sort(key=lambda a: a.asset.hostname)
-    return output
+router = APIRouter(prefix="/api/v1/threats", tags=["threats"], dependencies=[Depends(require_api_key)])
 
 
 @router.get("/kev", response_model=list[ThreatAssetOut])
 async def get_kev_threats(db: AsyncSession = Depends(get_db)) -> list[ThreatAssetOut]:
     """Assets with packages affected by CISA Known Exploited Vulnerabilities."""
-    return await _assets_by_vuln_filter(db, is_kev=True)
+    return await threat_assets(db, vuln_filters(is_kev=True))
 
 
 @router.get("/heuristics", response_model=list[ThreatAssetOut])
 async def get_heuristic_threats(db: AsyncSession = Depends(get_db)) -> list[ThreatAssetOut]:
-    """Assets with heuristic malware detections (MALICIOUS_HEURISTIC)."""
-    return await _assets_by_vuln_filter(db, is_heuristic=True)
+    """Assets with heuristic malware / typosquat detections."""
+    return await threat_assets(db, vuln_filters(is_heuristic=True))
+
+
+@router.get("/malicious", response_model=list[ThreatAssetOut])
+async def get_malicious_threats(db: AsyncSession = Depends(get_db)) -> list[ThreatAssetOut]:
+    """Assets with known-malicious packages (OpenSSF malicious-packages advisories, OSV MAL-*)."""
+    return await threat_assets(db, vuln_filters(is_malicious=True))
 
 
 @router.get("/critical", response_model=list[ThreatAssetOut])
 async def get_critical_threats(db: AsyncSession = Depends(get_db)) -> list[ThreatAssetOut]:
     """Assets with CRITICAL-severity vulnerabilities."""
-    return await _assets_by_vuln_filter(db, severity="CRITICAL")
+    return await threat_assets(db, vuln_filters(severity="CRITICAL"))
 
 
 @router.get("/high-epss", response_model=list[ThreatAssetOut])
@@ -103,29 +66,52 @@ async def get_high_epss_threats(
     db: AsyncSession = Depends(get_db),
 ) -> list[ThreatAssetOut]:
     """Assets with vulnerabilities above the given EPSS exploit probability threshold."""
-    return await _assets_by_vuln_filter(db, min_epss=min_score)
+    return await threat_assets(db, vuln_filters(min_epss=min_score))
 
 
 @router.get("/summary")
-async def get_threat_summary(db: AsyncSession = Depends(get_db)) -> dict:
-    """Aggregate threat statistics across all assets."""
-    total_assets = (await db.execute(select(func.count(Asset.id)))).scalar() or 0
-    total_packages = (await db.execute(select(func.count(Package.id)))).scalar() or 0
-    total_vulns = (await db.execute(select(func.count(Vulnerability.id)))).scalar() or 0
-    kev_count = (await db.execute(
-        select(func.count(Vulnerability.id)).where(Vulnerability.is_kev == True)
-    )).scalar() or 0
-    heuristic_count = (await db.execute(
-        select(func.count(Vulnerability.id)).where(Vulnerability.is_heuristic == True)
-    )).scalar() or 0
-    critical_count = (await db.execute(
-        select(func.count(Vulnerability.id)).where(func.upper(Vulnerability.severity) == "CRITICAL")
-    )).scalar() or 0
-
-    sev_result = await db.execute(
-        select(Vulnerability.severity, func.count(Vulnerability.id)).group_by(Vulnerability.severity)
+async def get_threat_summary(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+    """Fleet-wide statistics. Counts only exposure that is currently installed on at least one asset."""
+    exposure = (
+        select(Vulnerability.id, Vulnerability.severity, Vulnerability.is_kev, Vulnerability.is_heuristic,
+               Vulnerability.is_malicious)
+        .join(package_vulnerability, package_vulnerability.c.vulnerability_id == Vulnerability.id)
+        .join(asset_package, asset_package.c.package_id == package_vulnerability.c.package_id)
+        .where(not_suppressed())
+        .distinct()
+        .subquery()
     )
-    severity_breakdown = {row[0]: row[1] for row in sev_result.all()}
+    total_assets = (await db.execute(select(func.count(Asset.id)))).scalar() or 0
+    total_packages = (await db.execute(select(func.count(distinct(asset_package.c.package_id))))).scalar() or 0
+    total_vulns = (await db.execute(select(func.count()).select_from(exposure))).scalar() or 0
+    kev_count = (await db.execute(
+        select(func.count()).select_from(exposure).where(exposure.c.is_kev.is_(True)))).scalar() or 0
+    heuristic_count = (await db.execute(
+        select(func.count()).select_from(exposure).where(exposure.c.is_heuristic.is_(True)))).scalar() or 0
+    malicious_count = (await db.execute(
+        select(func.count()).select_from(exposure).where(exposure.c.is_malicious.is_(True)))).scalar() or 0
+    suppressed_count = (await db.execute(select(func.count(Triage.id)).where(
+        Triage.state.in_(SUPPRESSED_STATES)))).scalar() or 0
+    severity_breakdown = {
+        (sev or "UNKNOWN").upper(): n
+        for sev, n in (await db.execute(
+            select(exposure.c.severity, func.count()).group_by(exposure.c.severity))).all()
+    }
+    ecosystem_breakdown = dict((await db.execute(
+        select(Package.ecosystem, func.count(distinct(Package.id)))
+        .join(asset_package, asset_package.c.package_id == Package.id)
+        .group_by(Package.ecosystem)
+    )).all())
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=get_settings().stale_days)
+    stale_assets = (await db.execute(select(func.count(Asset.id)).where(Asset.last_seen < cutoff))).scalar() or 0
+
+    assets = (await db.execute(select(Asset))).scalars().all()
+    stats = sorted(await asset_stats(db, assets), key=lambda a: (-a.risk_score, a.hostname))
+    recent = (await db.execute(
+        select(ScanRecord, Asset.hostname).join(Asset, Asset.id == ScanRecord.asset_id)
+        .order_by(ScanRecord.received_at.desc()).limit(10)
+    )).all()
 
     return {
         "total_assets": total_assets,
@@ -133,6 +119,27 @@ async def get_threat_summary(db: AsyncSession = Depends(get_db)) -> dict:
         "total_vulnerabilities": total_vulns,
         "kev_vulnerabilities": kev_count,
         "heuristic_detections": heuristic_count,
-        "critical_vulnerabilities": critical_count,
+        "malicious_packages": malicious_count,
+        "suppressed_decisions": suppressed_count,
+        "eol_assets": sum(1 for a in stats if any(e.get("is_eol") for e in a.eol)),
+        "license_violations": sum(a.license_violation_count for a in stats),
+        "target_breakdown": _count_by(a.target_type or "host" for a in stats),
+        "critical_vulnerabilities": severity_breakdown.get("CRITICAL", 0),
         "severity_breakdown": severity_breakdown,
+        "ecosystem_breakdown": ecosystem_breakdown,
+        "stale_assets": stale_assets,
+        "stale_after_days": get_settings().stale_days,
+        "top_risky_assets": [
+            {"hostname": a.hostname, "risk_score": a.risk_score, "kev_count": a.kev_count,
+             "heuristic_count": a.heuristic_count, "malicious_count": a.malicious_count,
+             "critical": a.severity_counts.get("CRITICAL", 0), "target_type": a.target_type or "host"}
+            for a in stats[:5] if a.vulnerability_count
+        ],
+        "recent_scans": [
+            {"hostname": host, "received_at": as_utc(rec.received_at), "total_packages": rec.total_packages,
+             "source": rec.source or "agent",
+             "critical": rec.critical, "high": rec.high, "kev_hits": rec.kev_hits,
+             "heuristic_hits": rec.heuristic_hits}
+            for rec, host in recent
+        ],
     }

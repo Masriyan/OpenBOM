@@ -103,8 +103,12 @@ Receive and persist an agent scan payload. This endpoint is idempotent — re-su
 - Creates `Package` records for each unique (name, version, ecosystem) tuple
 - Links packages to the asset via the `asset_package` junction table
 - Creates `Vulnerability` records for each unique `vuln_id`
-- Heuristic findings (`MALICIOUS_HEURISTIC`) are namespaced as `MALICIOUS_HEURISTIC::package_name` to avoid collision
-- All fields on existing Vulnerability records are updated on re-ingest
+- Heuristic findings (`MALICIOUS_HEURISTIC`, `TYPOSQUAT_SUSPECT`) are namespaced as `<ID>::<ecosystem>::<package>`
+- **Snapshot semantics**: the asset's package links are replaced by the payload, so uninstalled or upgraded
+  packages stop counting against the host (`packages_unlinked` in the response)
+- Non-null fields on existing Vulnerability records are updated on re-ingest; `is_kev` is sticky
+- Every ingest adds a row to the asset's scan history (`/assets/{hostname}/scans`)
+- Payloads from agent v4 are still accepted; unknown fields are ignored
 
 ---
 
@@ -302,6 +306,54 @@ List vulnerabilities affecting a specific asset (de-duplicated across packages).
 ```
 
 ---
+
+## Authentication
+
+When `OPENBOM_API_KEY` is set (comma-separated for several keys), every `/api/v1` route requires
+`X-API-Key: <key>` or `Authorization: Bearer <key>`; otherwise it returns `401`. `/health` and the
+dashboard shell (`/`) stay public — the dashboard asks for the key in **Settings** and keeps it in
+browser `localStorage`.
+
+## Additional Endpoints (backend 2.0)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/v1/assets?q=&sort=risk\|hostname\|last_seen\|packages` | Assets with package/vuln counts, KEV/IOC counts, max EPSS, 0-100 `risk_score`, `stale` flag |
+| `DELETE` | `/api/v1/assets/{hostname}` | Decommission an asset (links + scan history) |
+| `GET` | `/api/v1/assets/{hostname}/scans` | Per-ingest history (counts, diff new/removed) |
+| `GET` | `/api/v1/assets/{hostname}/sbom` | CycloneDX 1.5 JSON for the current snapshot |
+| `GET` | `/api/v1/assets/{hostname}/vulnerabilities?severity=&kev=&heuristic=` | Now includes `affected_packages` with per-package `fixed_version` |
+| `GET` | `/api/v1/packages/search?name=&version=&ecosystem=&exact=` | Which hosts have package X installed right now |
+| `GET` | `/api/v1/vulnerabilities?severity=&kev=&heuristic=&min_epss=&q=` | Vulns present on ≥1 asset, highest risk first |
+| `GET` | `/api/v1/vulnerabilities/{vuln_id}` | Detail + every affected host/package |
+| `POST` | `/api/v1/maintenance/prune` | Delete packages no asset has and vulns no package references |
+
+`risk_score` = `100·(1−e^(−Σ/200))`, where each distinct vulnerability adds its severity weight
+(CRITICAL 10, HIGH 6, MEDIUM 3, LOW/UNKNOWN 1) + 15 if KEV + 20 if heuristic + 30 if known-malicious + 10·EPSS.
+Triage-suppressed findings are excluded.
+
+Timestamps are always returned in UTC (`Z`).
+
+## Governance Endpoints (backend 2.1)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/v1/threats/malicious` | Assets with known-malicious packages (OSV `MAL-*`) |
+| `GET` | `/api/v1/triage?state=` | List analyst decisions |
+| `PUT` | `/api/v1/triage` | Body `{vuln_id, hostname?, state, justification?, detail?, author?}`; states: `in_triage`, `exploitable`, `not_affected`, `false_positive`, `resolved`. Omit `hostname` for a fleet-wide decision |
+| `DELETE` | `/api/v1/triage/{id}` | Remove a decision |
+| `GET` | `/api/v1/vex` | OpenVEX 0.2.0 document generated from triage (products = affected purls) |
+| `POST` | `/api/v1/vex` | Import OpenVEX statements as fleet-wide decisions (matched by id or CVE alias) |
+| `GET` | `/api/v1/licenses` | `[{license, packages, assets}]` over installed packages (`UNKNOWN` = no data) |
+| `GET` | `/api/v1/licenses/packages?license=` | Packages + hosts for one license |
+| `GET` | `/api/v1/eol` | Assets with end-of-life data reported by agents |
+| `POST` | `/api/v1/sbom?hostname=&analyze=true` | Body = CycloneDX or SPDX JSON; creates/updates an asset (`target_type=sbom`), optionally analysed server-side |
+| `POST` | `/api/v1/assets/{hostname}/reanalyze` | Re-run OSV/EPSS/KEV on the stored inventory |
+| `POST` | `/api/v1/reanalyze` | Same for every asset (also scheduled by `OPENBOM_REANALYZE_HOURS`) |
+
+`/api/v1/vulnerabilities` and `/api/v1/assets/{hostname}/vulnerabilities` accept `include_suppressed=true`
+to show triaged findings (each item carries `triage_state`). Assets now also report `target_type`,
+`target_ref`, `eol`, `malicious_count` and `license_violation_count`; packages carry `license` and `purl`.
 
 ## Error Responses
 

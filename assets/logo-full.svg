@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 236 64" role="img" aria-label="OpenBOM — Supply Chain Threat Hunter">
+  <defs>
+    <linearGradient id="obf-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1d1f27"/>
+      <stop offset="1" stop-color="#0d0e12"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#obf-bg)"/>
+  <g fill="#3a3d48">
+    <rect x="12" y="16" width="4" height="32" rx="2"/>
+    <rect x="20" y="16" width="7" height="32" rx="2"/>
+    <rect x="31" y="16" width="3" height="32" rx="1.5"/>
+    <rect x="38" y="16" width="6" height="32" rx="2"/>
+    <rect x="48" y="16" width="4" height="32" rx="2"/>
+  </g>
+  <rect x="20" y="24" width="7" height="16" rx="2" fill="#ff4757"/>
+  <circle cx="23.5" cy="32" r="12" fill="none" stroke="#f1f2f6" stroke-width="4"/>
+  <line x1="32.5" y1="41" x2="41" y2="49.5" stroke="#f1f2f6" stroke-width="4.5" stroke-linecap="round"/>
+  <text x="76" y="38" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="27">
+    <tspan font-weight="500" fill="#f1f2f6">Open</tspan><tspan font-weight="900" fill="#ff4757">BOM</tspan>
+  </text>
+  <text x="77" y="53" font-family="system-ui, -apple-system, sans-serif" font-size="7.4" font-weight="600" fill="#8a93a6" letter-spacing="2.2">SUPPLY CHAIN THREAT HUNTER</text>
+</svg>

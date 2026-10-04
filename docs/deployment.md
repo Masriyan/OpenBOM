@@ -1,79 +1,89 @@
 # Production Deployment Guide
 
-> Deploying OpenBOM at scale with PostgreSQL, systemd, and fleet-wide agent management.
+> Running the OpenBOM backend (2.1) with PostgreSQL, systemd and TLS, and rolling agents out to a fleet.
 
-## Architecture Overview
+## Architecture overview
 
-A production OpenBOM deployment consists of:
-
-1. **Backend Server** — FastAPI application with PostgreSQL, running behind a reverse proxy
-2. **Endpoint Agents** — Deployed to every managed Linux host, running on a schedule
-3. **Alerting** — Webhook integration to Slack, Teams, or your SIEM
+1. **Backend** — FastAPI application (API + Arco Design console) behind a TLS reverse proxy.
+2. **Database** — PostgreSQL for fleets (SQLite is fine for a single analyst or a lab).
+3. **Agents** — scheduled on every Linux host, in CI pipelines, or pointed at images/SBOMs.
+4. **Alerting** — agent webhooks to Slack/Teams/Discord, plus polling of the threat API.
 
 ```
-                    ┌──────────────────────────┐
-                    │   Nginx / Caddy / ALB    │
-                    │   (TLS termination)      │
-                    └────────────┬─────────────┘
-                                 │
-                    ┌────────────v─────────────┐
-                    │   OpenBOM Backend        │
-                    │   uvicorn --workers 4    │
-                    │   port 8000              │
-                    └────────────┬─────────────┘
-                                 │
-                    ┌────────────v─────────────┐
-                    │   PostgreSQL 15+         │
-                    │   database: openbom      │
-                    └──────────────────────────┘
+   agents (hosts, CI, image scans)          analysts (browser)
+                │  POST /api/v1/ingest            │  https://openbom.internal/
+                └──────────────┬──────────────────┘
+                     ┌─────────v──────────┐
+                     │ Nginx / Caddy (TLS)│
+                     └─────────┬──────────┘
+                     ┌─────────v──────────┐      outbound HTTPS (server-side analysis):
+                     │ uvicorn server.main│ ───► api.osv.dev, api.first.org, www.cisa.gov
+                     │ (API + console)    │
+                     └─────────┬──────────┘
+                     ┌─────────v──────────┐
+                     │ PostgreSQL 14+     │
+                     └────────────────────┘
 ```
 
-## Backend Setup
+## Backend setup
 
 ### 1. Database
 
 ```bash
-# PostgreSQL
 sudo -u postgres createuser openbom --pwprompt
 sudo -u postgres createdb openbom --owner=openbom
 ```
 
+Tables are created on first start; later versions add new (nullable) columns automatically and log
+`Schema upgrade: added column …`. Back up the database before upgrading.
+
 ### 2. Application
 
 ```bash
-# Clone and install
-git clone https://github.com/Masriyan/OpenBOM.git /opt/OpenBOM
+sudo useradd --system --home /opt/OpenBOM --shell /usr/sbin/nologin openbom
+sudo git clone https://github.com/Masriyan/OpenBOM.git /opt/OpenBOM
 cd /opt/OpenBOM
-python3 -m venv venv
-source venv/bin/activate
-pip install fastapi uvicorn sqlalchemy asyncpg pydantic
-
-# Configure
-export DATABASE_URL="postgresql+asyncpg://openbom:yourpassword@localhost:5432/openbom"
+sudo python3 -m venv venv
+sudo venv/bin/pip install -r requirements.txt asyncpg
+sudo install -d -o openbom -g openbom -m 0700 /var/lib/openbom
 ```
 
-### 3. Systemd Service
+### 3. Configuration
+
+```bash
+# /etc/openbom/backend.env  (chmod 600, owned by root)
+DATABASE_URL=postgresql+asyncpg://openbom:CHANGE_ME@localhost:5432/openbom
+OPENBOM_API_KEY=<output of: openssl rand -hex 32>        # comma-separate several keys to rotate
+OPENBOM_CORS_ORIGINS=https://openbom.internal
+OPENBOM_STALE_DAYS=7
+OPENBOM_REANALYZE_HOURS=24                              # continuous monitoring (0 = off)
+OPENBOM_STATE_DIR=/var/lib/openbom                      # OSV/KEV cache for server-side analysis
+```
+
+All variables are described in the [Configuration Reference](configuration.md#backend-environment-variables).
+
+### 4. systemd service
 
 ```ini
 # /etc/systemd/system/openbom-backend.service
 [Unit]
-Description=OpenBOM Backend Server
-After=network.target postgresql.service
-Requires=postgresql.service
+Description=OpenBOM backend
+After=network-online.target postgresql.service
+Wants=network-online.target
 
 [Service]
 Type=exec
 User=openbom
 Group=openbom
 WorkingDirectory=/opt/OpenBOM
-Environment=DATABASE_URL=postgresql+asyncpg://openbom:yourpassword@localhost:5432/openbom
-ExecStart=/opt/OpenBOM/venv/bin/uvicorn server.main:app \
-    --host 127.0.0.1 \
-    --port 8000 \
-    --workers 4 \
-    --access-log
+EnvironmentFile=/etc/openbom/backend.env
+ExecStart=/opt/OpenBOM/venv/bin/uvicorn server.main:app --host 127.0.0.1 --port 8000 --workers 1 --proxy-headers
 Restart=always
 RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/openbom
+PrivateTmp=true
 
 [Install]
 WantedBy=multi-user.target
@@ -82,18 +92,29 @@ WantedBy=multi-user.target
 ```bash
 sudo systemctl daemon-reload
 sudo systemctl enable --now openbom-backend
+curl -s http://127.0.0.1:8000/health     # {"status":"ok",…,"auth_required":true}
 ```
 
-### 4. Reverse Proxy (Nginx)
+**Workers and re-analysis:** with `OPENBOM_REANALYZE_HOURS` set, every uvicorn worker runs its own
+schedule. Either keep `--workers 1` (sufficient for most fleets — ingest is bulk) or run the API with
+several workers and `OPENBOM_REANALYZE_HOURS=0`, triggering `POST /api/v1/reanalyze` from cron instead:
+
+```bash
+0 4 * * * curl -sf -X POST -H "X-API-Key: $KEY" https://openbom.internal/api/v1/reanalyze >/dev/null
+```
+
+### 5. Reverse proxy (Nginx)
 
 ```nginx
 # /etc/nginx/conf.d/openbom.conf
 server {
     listen 443 ssl http2;
-    server_name openbom.internal.yourcompany.com;
+    server_name openbom.internal;
 
     ssl_certificate     /etc/pki/tls/certs/openbom.crt;
     ssl_certificate_key /etc/pki/tls/private/openbom.key;
+
+    client_max_body_size 64m;          # large hosts / SBOM uploads
 
     location / {
         proxy_pass http://127.0.0.1:8000;
@@ -101,153 +122,119 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 300s;        # fleet re-analysis can take minutes
     }
 }
 ```
 
-## Agent Deployment
+Serve OpenBOM at the root of a (sub)domain; sub-path deployments are not supported. The backend sets
+its own CSP and security headers — do not override them with a weaker policy.
 
-### 1. Install Agent on Endpoints
+## Agent rollout
 
-```bash
-# Ansible example
+### Ansible
+
+```yaml
 - name: Deploy OpenBOM agent
-  hosts: all
+  hosts: linux
+  become: true
+  vars:
+    openbom_server: https://openbom.internal
+    openbom_api_key: "{{ vault_openbom_api_key }}"
   tasks:
-    - name: Create directory
-      file:
-        path: /opt/OpenBOM/agent
-        state: directory
-        mode: '0755'
+    - name: Install dependencies
+      ansible.builtin.pip:
+        name: [httpx, rich, jinja2, packaging]
+
+    - name: Agent directory
+      ansible.builtin.file: {path: /opt/OpenBOM/agent/templates, state: directory, mode: "0755"}
 
     - name: Copy agent
-      copy:
-        src: agent/openbom_agent.py
-        dest: /opt/OpenBOM/agent/openbom_agent.py
-        mode: '0755'
+      ansible.builtin.copy: {src: agent/openbom_agent.py, dest: /opt/OpenBOM/agent/openbom_agent.py, mode: "0755"}
 
-    - name: Install dependencies
-      pip:
-        name:
-          - httpx
-          - rich
-        executable: pip3
+    - name: Copy report template
+      ansible.builtin.copy: {src: agent/templates/report_template.html, dest: /opt/OpenBOM/agent/templates/, mode: "0644"}
 
-    - name: Deploy scan script
-      template:
-        src: templates/openbom-scan.sh.j2
-        dest: /opt/OpenBOM/run_scan.sh
-        mode: '0755'
+    - name: Agent environment
+      ansible.builtin.copy:
+        dest: /etc/openbom/agent.env
+        mode: "0600"
+        content: |
+          OPENBOM_SERVER_URL={{ openbom_server }}
+          OPENBOM_API_KEY={{ openbom_api_key }}
 
-    - name: Deploy systemd timer
-      template:
-        src: templates/openbom-scan.timer.j2
-        dest: /etc/systemd/system/openbom-scan.timer
-      notify: reload systemd
+    - name: systemd units
+      ansible.builtin.copy: {src: "files/{{ item }}", dest: "/etc/systemd/system/{{ item }}"}
+      loop: [openbom-scan.service, openbom-scan.timer]
 
     - name: Enable timer
-      systemd:
-        name: openbom-scan.timer
-        enabled: yes
-        state: started
+      ansible.builtin.systemd: {name: openbom-scan.timer, enabled: true, state: started, daemon_reload: true}
 ```
 
-### 2. Agent Scan Script
+The unit files are in the [Agent Guide](agent-guide.md#systemd-timer) (note `SuccessExitStatus=2` and
+`RandomizedDelaySec`).
+
+### Scan frequency
+
+| Asset type | Recommendation |
+|------------|----------------|
+| Internet-facing servers | every 6 h with `--diff` (new packages get heuristic checks quickly) |
+| Internal servers | daily |
+| Developer workstations | daily, `--heuristics new` |
+| CI | every build (`--path` / `--image`, see [CI/CD Integration](ci-integration.md)) |
+| Images in a registry | on push, plus nightly backend re-analysis |
+
+Between scans, backend re-analysis picks up advisories published since the last scan.
+
+## Alerting
+
+### Webhooks from agents
 
 ```bash
-#!/bin/bash
-# /opt/OpenBOM/run_scan.sh
-set -euo pipefail
-
-BACKEND_URL="{{ openbom_backend_url }}"
-SCAN_FILE="/tmp/openbom_scan_$$.json"
-AGENT="/opt/OpenBOM/agent/openbom_agent.py"
-
-# Run scan
-python3 "$AGENT" --check-osv --diff -o "$SCAN_FILE" 2>>/var/log/openbom_agent.log
-
-# Push to backend
-if [ -f "$SCAN_FILE" ]; then
-    curl -sf -X POST "$BACKEND_URL/api/v1/ingest" \
-        -H "Content-Type: application/json" \
-        -d @"$SCAN_FILE" >> /var/log/openbom_agent.log 2>&1
-    rm -f "$SCAN_FILE"
-fi
+--webhook-url https://hooks.slack.com/services/T000/B000/XXXX       # Slack (text)
+--webhook-url https://outlook.office.com/webhook/...                # Teams (text)
+--webhook-url https://discord.com/api/webhooks/...                  # Discord (content)
 ```
 
-### 3. Scan Frequency Recommendations
+Alerts are sent when known-malicious packages, KEV matches, heuristic detections, CRITICAL findings or
+end-of-life software are present. The URL is never written to logs.
 
-| Environment | Frequency | Rationale |
-|-------------|-----------|-----------|
-| Production servers | Every 6 hours | Balance between coverage and API load |
-| CI/CD runners | Every build | Catch newly introduced dependencies |
-| Development workstations | Daily | Track developer tool sprawl |
-| Container hosts | Every 4 hours | Container images change frequently |
-
-## Webhook Configuration
-
-### Slack
-
-1. Create a Slack App at https://api.slack.com/apps
-2. Enable Incoming Webhooks
-3. Create a webhook for your `#security-alerts` channel
-4. Pass the URL to the agent:
+### Polling the backend
 
 ```bash
-python3 agent/openbom_agent.py --check-osv --diff \
-    --webhook-url https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX
+# hourly: alert when any asset has a KEV or known-malicious finding
+0 * * * * for t in kev malicious; do \
+  n=$(curl -sf -H "X-API-Key: $KEY" https://openbom.internal/api/v1/threats/$t | python3 -c 'import sys,json;print(len(json.load(sys.stdin)))'); \
+  [ "$n" -gt 0 ] && echo "OpenBOM: $n asset(s) with $t findings" | mail -s "OpenBOM $t alert" soc@example.com; done
 ```
 
-### Microsoft Teams
+## Monitoring
 
-1. In your Teams channel, add an Incoming Webhook connector
-2. Copy the webhook URL
-3. Pass it to the agent (same `--webhook-url` flag — the payload format is compatible)
+| Check | How |
+|-------|-----|
+| Liveness | `GET /health` (no auth) |
+| Fleet coverage | `GET /api/v1/threats/summary` → `stale_assets`, `recent_scans` |
+| Re-analysis | backend log line `Scheduled re-analysis: N assets, …` |
+| Database growth | run *Settings → Prune orphaned records* (or `POST /api/v1/maintenance/prune`) after decommissioning many assets |
 
-## Monitoring the Backend
+## Scaling
 
-### Health Check
+| Component | Strategy |
+|-----------|----------|
+| Ingest | Bulk upserts (chunks of 400); thousands of packages per host ingest in about a second |
+| API | More uvicorn workers or replicas behind the proxy (see the re-analysis note above) |
+| PostgreSQL | Standard tuning, connection pooling (pgBouncer), regular backups |
+| Agents | Stagger schedules (`RandomizedDelaySec`); each agent caches OSV 12 h, KEV/EOL 24 h |
+| External APIs | Batched OSV (1000) and EPSS (100) queries with retry/backoff |
 
-```bash
-curl -sf http://localhost:8000/health
-# {"status": "ok", "service": "openbom-backend"}
-```
+## Security checklist
 
-### Fleet Summary
+- [ ] `OPENBOM_API_KEY` set; keys distributed via a secret manager; rotate by adding the new key, rolling agents, removing the old one
+- [ ] TLS at the proxy; backend bound to `127.0.0.1`
+- [ ] PostgreSQL over TLS or local socket; database reachable only from the backend host
+- [ ] `OPENBOM_CORS_ORIGINS` restricted to the console origin
+- [ ] `/etc/openbom/*.env` mode `0600`
+- [ ] Agent logs (`/var/log/openbom_agent.log`) treated as internal data
+- [ ] Outbound HTTPS allowed from agents and backend to `api.osv.dev`, `api.first.org`, `www.cisa.gov`, `endoflife.date` (and `api.deps.dev` if `--deps-dev` is used)
 
-```bash
-curl -sf http://localhost:8000/api/v1/threats/summary | python3 -m json.tool
-```
-
-### Alert on KEV Findings
-
-```bash
-# Cron job that checks for KEV threats every hour
-0 * * * * curl -sf http://localhost:8000/api/v1/threats/kev | python3 -c "
-import sys, json
-data = json.load(sys.stdin)
-if data:
-    hosts = [a['asset']['hostname'] for a in data]
-    print(f'KEV ALERT: {len(hosts)} host(s) affected: {hosts}')
-    sys.exit(1)
-" || mail -s "OpenBOM KEV Alert" security@yourcompany.com
-```
-
-## Scaling Considerations
-
-| Component | Scaling Strategy |
-|-----------|-----------------|
-| Backend API | Increase `--workers` (1 per CPU core) or deploy behind a load balancer |
-| PostgreSQL | Standard PostgreSQL scaling: read replicas, connection pooling (pgBouncer) |
-| Agent scans | Stagger cron jobs across fleet to avoid API thundering herd |
-| OSV API | Agent-side caching (12h) reduces load; batch queries minimize request count |
-| KEV catalog | Single 1.2MB download per agent, cached 24 hours |
-| EPSS API | Batch queries (100 CVEs per request) minimize request count |
-
-## Security Considerations
-
-- **No secrets in agent output**: The JSON payload contains only package names, versions, and public vulnerability data
-- **Backend authentication**: Not included in the open-source version. Add API key middleware or OAuth2 for production deployments
-- **Network**: Agents need outbound HTTPS to osv.dev, api.first.org, and cisa.gov. Backend needs inbound HTTP from agents only
-- **Database**: Use TLS for PostgreSQL connections in production
-- **Log files**: `/var/log/openbom_agent.log` may contain hostnames and package names — restrict access appropriately
+See also [SECURITY.md](../SECURITY.md).
