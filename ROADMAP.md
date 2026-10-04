@@ -32,4 +32,5 @@ welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
 ## Done recently
 
 See [CHANGELOG.md](CHANGELOG.md): multi-ecosystem OSV matching, malicious-package intel, repo/image/rootfs/SBOM
-targets, SPDX/SARIF, licenses, EOL, VEX & triage, continuous re-analysis, Arco Design console.
+targets, SPDX/SARIF, licenses, EOL, VEX & triage, continuous re-analysis, Arco Design console, package
+locations ("found in" paths from agent to console) and the console refresh (palette, motion, layout).

@@ -22,6 +22,8 @@
 
 <p align="center"><img src="assets/dashboard-overview.jpg" alt="OpenBOM console (Arco Design) — fleet overview" width="100%"></p>
 
+<p align="center"><img src="assets/dashboard-vulnerabilities.jpg" alt="OpenBOM console — vulnerabilities with the package, fix and the path where each copy was found" width="100%"></p>
+
 > How OpenBOM compares to Syft, Grype, Trivy, OSV-Scanner, cdxgen, Dependency-Track and Socket:
 > **[docs/comparison.md](docs/comparison.md)**.
 
@@ -124,12 +126,13 @@ By fusing these signals, OpenBOM transforms a wall of CVEs into a short list of 
 | **PoC/exploit detection** | Scans OSV references for exploit-db, PacketStorm, and GitHub PoC links |
 | **Heuristic IOC scanner** | Strong indicators (`exec(base64)`, reverse shells, miners, `curl \| sh` npm install hooks) → CRITICAL; co-occurring weak indicators (credential paths + Discord/Telegram exfil, `.pth` auto-exec…) → HIGH. Scope: `--heuristics new\|all\|off` |
 | **Typosquat detection** | Flags PyPI/npm packages one edit away from popular names (`reqeusts`, `lodahs`) with a curated allowlist of legitimate look-alikes |
+| **Package locations** | Every package records where it lives: `*.dist-info` / `node_modules` dir on hosts, lockfile/venv/manifest for `--path` and `--rootfs` scans. It is shown in the CLI, HTML report, JSON and console, so you know *which* copy to fix |
 | **Delta/diff scanning** | Labels `[NEW]`, `[UPGRADED]`, `[DOWNGRADED]` with rpm/dpkg/PEP 440/semver ordering; lists removed packages |
 | **CycloneDX 1.5 export** | `--cyclonedx PATH` writes a standard SBOM with purls and vulnerabilities |
 | **Backend push** | `--server-url` / `--push-file` upload results directly (API-key aware) |
 | **Interactive menu** | Run with no flags on a terminal for a guided menu (scan, hunt, view, push, export, cache management) |
 | **CI gating** | `--fail-on critical\|high\|…` controls exit code 2 |
-| **Rich CLI output** | Progress bars, severity tables, KEV/IOC alert panels with blinking red indicators |
+| **Rich CLI output** | Progress bars, severity tables, KEV/IOC alert panels (with "found in" paths) |
 | **HTML/PDF reporting** | Professional dark-theme reports via Jinja2 + Tailwind CSS + WeasyPrint |
 | **Safe caching** | 12h OSV / 24h KEV caches in a private `0700` state dir (never `/tmp`), atomic writes, failed lookups never cached as "clean" |
 | **Webhook alerting** | POST to Slack/Teams/Discord when CRITICAL, KEV or IOC findings are detected |
@@ -141,10 +144,10 @@ By fusing these signals, OpenBOM transforms a wall of CVEs into a short list of 
 | **Async FastAPI** | Fully async with SQLAlchemy 2.0 + asyncpg/aiosqlite |
 | **Flexible database** | PostgreSQL for production, SQLite for development — auto-detected |
 | **Snapshot ingestion** | Idempotent bulk upsert; uninstalled/upgraded packages are unlinked so findings reflect what is installed *now* |
-| **Web console (Arco Design)** | `http://server:8000/` — Overview, Assets, Threat Hunt (Malicious/KEV/IOC/Critical/EPSS), Vulnerabilities, Package Search, Licenses, End-of-Life, Triage & VEX, SBOM Import, Reports & Export, Agent Setup, Settings. Dark/light theme, offline (vendored assets), strict CSP |
-| **Triage & VEX** | Fleet-wide or per-asset decisions (not_affected, false_positive, …) suppress findings; OpenVEX import/export |
+| **Web console (Arco Design)** | `http://server:8000/` — Overview, Assets, Threat Hunt (Malicious/KEV/IOC/Critical/EPSS), Vulnerabilities, Package Search, Licenses, End-of-Life, Triage & VEX, SBOM Import, Reports & Export, Agent Setup, Settings. Shows the path of every affected package. Dark/light theme with smooth motion (respects reduced-motion), offline (vendored assets), strict CSP |
+| **Triage & VEX** | Fleet-wide or per-asset decisions (not_affected, false_positive, …) suppress findings; `resolved` findings that are still detected are flagged; OpenVEX import/export |
 | **SBOM import & continuous monitoring** | Upload CycloneDX/SPDX from any tool; re-match stored inventories against fresh OSV/EPSS/KEV on demand or every `OPENBOM_REANALYZE_HOURS` |
-| **Threat hunting API** | KEV, heuristic IOC, severity, EPSS, fleet-wide package search ("who has xz 5.6.0?"), vuln → affected hosts |
+| **Threat hunting API** | KEV, heuristic IOC, severity, EPSS, fleet-wide package search ("who has xz 5.6.0, and where?"), vuln → affected hosts and paths |
 | **Risk scoring & history** | Per-asset 0-100 risk score, stale-asset detection, per-scan history |
 | **API-key auth** | `OPENBOM_API_KEY` protects all `/api/v1` routes |
 | **CycloneDX export** | `/api/v1/assets/{host}/sbom` |
@@ -393,8 +396,8 @@ OpenBOM/
 │   └── …                             # configuration, dashboard, CI, SBOM/VEX, detection rules,
 │                                     # development, troubleshooting, comparison (see docs/README.md)
 ├── CHANGELOG.md · ROADMAP.md · SECURITY.md · CONTRIBUTING.md · CODE_OF_CONDUCT.md
-├── output/                           # Generated reports (JSON, HTML, PDF)
-├── logs/                             # Agent log files
+├── output/                           # Generated reports (JSON, HTML, PDF) — git-ignored
+├── logs/                             # Agent log files — git-ignored
 └── README.md
 ```
 

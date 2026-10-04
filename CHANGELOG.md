@@ -8,6 +8,27 @@ All notable changes to OpenBOM. The agent and the backend are versioned separate
 ### Added
 - Documentation set: configuration reference, dashboard guide, CI/CD integration, SBOM/VEX & triage,
   detection rules, development guide, troubleshooting, roadmap, code of conduct, GitHub templates.
+- Findings now carry **where** a package was found (`asset_package.location`, from path/rootfs/image scans):
+  shown in threat tables and the vulnerability drawer, so a "fixed but still reported" package can be traced
+  to the venv/lockfile that still pins it. Threat cards show the last-scan time and the rescan command.
+  Host pip packages now record their `*.dist-info` directory (fallback: `pip list -v` location) and global npm
+  packages their `node_modules` directory; the backend stores path/rootfs locations as absolute paths
+  (joined with the scan root). The agent's terminal summary and HTML report print "found in <path>".
+- Paths everywhere: `/vulnerabilities` returns `occurrences` (host · package · fix · path, first 5),
+  package search returns per-host `locations`, `/assets/{h}/packages` returns `location`. The console shows
+  them on the Vulnerabilities list, the vulnerability drawer, threat tables, Package Search and the asset
+  Packages tab (long paths are shortened around the project and file; the full path is in the tooltip).
+- Triage `resolved` on a finding that is still present now shows "resolved · still detected" with an
+  explanation (only `not_affected` / `false_positive` hide findings) instead of looking like a bug.
+- Overview layout: equal-height card rows, severity tiles, ecosystem bars, full-width recent scans.
+- OS/container packages show "system package (package manager)" instead of a missing path.
+- Docs: dashboard guide (paths, Overview layout, `resolved` semantics), troubleshooting ("fixed but still
+  shows", empty columns after upgrade), agent guide (`location` per target), architecture, API reference,
+  SBOM/VEX, threat model, SECURITY (paths are sent to the backend; never commit scan output), development
+  guide (tokens, motion, `Row.ob-eq`, paths), README features and new screenshots from a synthetic demo fleet.
+- Table cells wrap at word boundaries (Arco's default `break-all` split words like "win|dows").
+- Console refresh: indigo primary palette, blue-tinted dark surfaces, page/card enter transitions, staggered
+  KPI cards with count-up numbers, animated severity bar, skeleton loaders (honours `prefers-reduced-motion`).
 
 ## [Agent 5.1.0 / Backend 2.1.0] — 2026-10-04
 

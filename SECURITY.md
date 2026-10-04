@@ -4,7 +4,7 @@
 
 **Do not open a public GitHub issue for security vulnerabilities.**
 
-Report privately by e-mail to **riyan.pratama@security-life.org**, or through a GitHub security advisory:
+Report privately by e-mail to **security@openbom.dev**, or through a GitHub security advisory:
 <https://github.com/Masriyan/OpenBOM/security/advisories/new>
 
 Please include a description, reproduction steps, affected component and version, impact, and a
@@ -40,8 +40,9 @@ upstream intelligence feeds (OSV, CISA KEV, EPSS, endoflife.date, deps.dev).
 * Runs unprivileged for user-level scans; root is only needed to read root-owned package metadata.
 * Makes outbound HTTPS requests only: `api.osv.dev`, `api.first.org`, `www.cisa.gov`, `endoflife.date`,
   `api.deps.dev` (only with `--deps-dev`), plus the backend and webhook URLs you configure. Never listens on a port.
-* Sends package names, versions, licenses, OS name and findings — never file contents, credentials or
-  environment variables.
+* Sends package names, versions, licenses, OS name, findings and **package locations** (install
+  directory or manifest path, which can include user names such as `/home/<user>/…`). It never sends file
+  contents, credentials or environment variables. Treat the backend database as internal inventory data.
 * Heuristic scanning reads package source as text; nothing is imported or executed. Symlinks are not followed.
 * Caches and diff baselines live in a private state dir (`~/.cache/openbom` or `/var/lib/openbom`,
   mode `0700`, files `0600`), written atomically. Symlinked or foreign-owned state files are ignored —
@@ -71,3 +72,5 @@ upstream intelligence feeds (OSV, CISA KEV, EPSS, endoflife.date, deps.dev).
 * Use PostgreSQL with TLS for fleets; restrict database access to the backend host.
 * Restrict `OPENBOM_CORS_ORIGINS` to the console origin if browsers on other origins should not call the API.
 * Treat the agent log (`/var/log/openbom_agent.log`) as internal: it contains host and package names.
+* Treat scan output (`output/`, the backend database) the same way: it contains host names, package
+  inventories and file-system paths. These files are listed in `.gitignore`; do not commit them.
